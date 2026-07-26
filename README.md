@@ -26,18 +26,18 @@ Coil · Room (KSP) · SceneView/Filament
 
 ## NVIDIA API key
 
-The TRELLIS key is injected at build time as `BuildConfig.TRELLIS_API_KEY`.
-Provide it via a Gradle property or environment variable:
+Enter your key in the app's **Settings** tab (get a free key at
+[build.nvidia.com](https://build.nvidia.com) → microsoft/trellis; it starts with
+`nvapi-`). The key is stored locally on the device via SharedPreferences.
+
+Alternatively a default key can be baked in at build time as
+`BuildConfig.TRELLIS_API_KEY` (used as fallback when Settings is empty):
 
 ```bash
 ./gradlew assembleDebug -PTRELLIS_API_KEY=nvapi-xxxxxxxx
-# or
-TRELLIS_API_KEY=nvapi-xxxxxxxx ./gradlew assembleDebug
 ```
 
-You can also add `TRELLIS_API_KEY=nvapi-xxxxxxxx` to `~/.gradle/gradle.properties`
-(kept out of the repo). Without a key the app builds and runs; the 3D generation screen
-shows a clear error explaining that the key is missing.
+Without any key the app runs fine; the 3D screen shows an error pointing to Settings.
 
 ## Build
 

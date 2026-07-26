@@ -16,7 +16,8 @@ import java.util.zip.ZipInputStream
 class TrellisRepository(
     private val context: Context,
     private val api: TrellisApi,
-    private val apiKey: String
+    /** Resolves the current API key — Settings first, BuildConfig fallback. */
+    private val apiKeyProvider: () -> String
 ) {
 
     private val modelsDir: File
@@ -30,10 +31,10 @@ class TrellisRepository(
         imageFile: File,
         onStatus: (String) -> Unit = {}
     ): File = withContext(Dispatchers.IO) {
+        val apiKey = apiKeyProvider()
         if (apiKey.isBlank()) {
             throw AppException.Api(
-                "NVIDIA API key is missing. Rebuild the app with the TRELLIS_API_KEY " +
-                    "gradle property set (see README)."
+                "NVIDIA API key is missing. Add your key in the Settings tab."
             )
         }
 
@@ -74,7 +75,7 @@ class TrellisRepository(
             val detail = response.errorBody()?.string()?.take(300).orEmpty()
             throw AppException.Api(
                 when (response.code()) {
-                    401, 403 -> "The NVIDIA API key was rejected. Check TRELLIS_API_KEY and rebuild."
+                    401, 403 -> "The NVIDIA API key was rejected. Check the key in Settings."
                     429 -> "NVIDIA API rate limit reached. Wait a moment and retry."
                     else -> "3D generation failed (HTTP ${response.code()}). $detail"
                 }

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import com.trellis.studio.data.ImageRepository
+import com.trellis.studio.data.SettingsRepository
 import com.trellis.studio.data.TrellisRepository
 import com.trellis.studio.data.api.PollinationsApi
 import com.trellis.studio.data.api.TrellisApi
@@ -56,11 +57,15 @@ class AppContainer(context: Context) {
         .build()
         .create(TrellisApi::class.java)
 
+    val settingsRepository = SettingsRepository(context.applicationContext)
+
     val imageRepository = ImageRepository(context.applicationContext, pollinationsApi)
 
     val trellisRepository = TrellisRepository(
         context.applicationContext,
         trellisApi,
-        apiKey = BuildConfig.TRELLIS_API_KEY
+        apiKeyProvider = {
+            settingsRepository.apiKey.value.ifBlank { BuildConfig.TRELLIS_API_KEY }
+        }
     )
 }

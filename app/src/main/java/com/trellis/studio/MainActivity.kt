@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.trellis.studio.ui.screens.HistoryScreen
 import com.trellis.studio.ui.screens.ImageTo3dScreen
+import com.trellis.studio.ui.screens.SettingsScreen
 import com.trellis.studio.ui.screens.TextToImageScreen
 import com.trellis.studio.ui.screens.ViewerScreen
 import com.trellis.studio.ui.theme.TrellisTheme
@@ -35,9 +37,10 @@ import com.trellis.studio.ui.theme.TrellisTheme
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    Tab("text_to_image", "Text to Image", Icons.Default.Image),
-    Tab("image_to_3d", "Image to 3D", Icons.Default.ViewInAr),
-    Tab("history", "History", Icons.Default.History)
+    Tab("text_to_image", "Image", Icons.Default.Image),
+    Tab("image_to_3d", "3D", Icons.Default.ViewInAr),
+    Tab("history", "History", Icons.Default.History),
+    Tab("settings", "Settings", Icons.Default.Settings)
 )
 
 class MainActivity : ComponentActivity() {
@@ -99,6 +102,9 @@ private fun MainScreen() {
                     onOpenViewer = { id -> navController.navigate("viewer/$id") },
                     onNavigateTo3d = { navigateToTab("image_to_3d") }
                 )
+            }
+            composable("settings") {
+                SettingsScreen()
             }
             composable(
                 "viewer/{id}",
