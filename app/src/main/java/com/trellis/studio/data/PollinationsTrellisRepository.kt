@@ -1,6 +1,8 @@
 package com.trellis.studio.data
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -28,22 +30,28 @@ class PollinationsTrellisRepository(
     private val modelsDir: File
         get() = File(context.filesDir, "models").apply { mkdirs() }
 
-    override suspend fun generateModel(imageFile: File, onStatus: (String) -> Unit): File {
+    override suspend fun generateModel(
+        imageFile: File,
+        onStatus: (String) -> Unit
+    ): File = withContext(Dispatchers.IO) {
         val apiKey = requireApiKey()
         onStatus("Uploading image…")
         val imageUrl = uploadImage(imageFile, apiKey)
         onStatus("Generating 3D model… this can take 30–90 seconds.")
-        return downloadGlb(
+        downloadGlb(
             prompt = "3D asset generated from the reference photo",
             imageUrl = imageUrl,
             apiKey = apiKey
         )
     }
 
-    override suspend fun generateFromPrompt(prompt: String, onStatus: (String) -> Unit): File {
+    override suspend fun generateFromPrompt(
+        prompt: String,
+        onStatus: (String) -> Unit
+    ): File = withContext(Dispatchers.IO) {
         val apiKey = requireApiKey()
         onStatus("Generating 3D model from your description… this can take 30–90 seconds.")
-        return downloadGlb(prompt = prompt, imageUrl = null, apiKey = apiKey)
+        downloadGlb(prompt = prompt, imageUrl = null, apiKey = apiKey)
     }
 
     private fun requireApiKey(): String {
