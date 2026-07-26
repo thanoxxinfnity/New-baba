@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -93,9 +94,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "Needed for Image-to-3D generation. Get a free key at build.nvidia.com " +
-                            "(microsoft/trellis) — it starts with \"nvapi-\". " +
-                            "The key is stored only on this device.",
+                        "Used ONLY for the Image-to-3D tab (turning a photo into a .glb model). " +
+                            "The Text-to-Image tab uses Pollinations FLUX, which never needs a key. " +
+                            "Get a free NVIDIA key at build.nvidia.com (microsoft/trellis) — it " +
+                            "starts with \"nvapi-\". Stored only on this device, never uploaded " +
+                            "anywhere except directly to NVIDIA's own servers when you generate.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -104,7 +107,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         value = apiKey,
                         onValueChange = { apiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("API key") },
+                        label = { Text("NVIDIA TRELLIS API key") },
                         placeholder = { Text("nvapi-…") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -141,8 +144,39 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 }
             }
 
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                )
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.foundation.layout.Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Text("About NVIDIA TRELLIS right now", style = MaterialTheme.typography.titleSmall)
+                    }
+                    Text(
+                        "NVIDIA's free/preview TRELLIS endpoint currently only accepts its own " +
+                            "sample images, not photos you upload — this is documented by NVIDIA " +
+                            "itself, not a bug in this app. It has also been intermittently " +
+                            "returning server errors for other developers. If Image-to-3D fails, " +
+                            "this is why. The app will start working automatically the moment " +
+                            "NVIDIA lifts the restriction and fixes the outage — no update needed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             Text(
-                "TRELLIS 3D Studio v1.0\nImages: Pollinations FLUX (free) • 3D: NVIDIA TRELLIS",
+                "TRELLIS 3D Studio v1.0\nImages: Pollinations FLUX (free, no key) • " +
+                    "3D: NVIDIA TRELLIS (key required, above)",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
