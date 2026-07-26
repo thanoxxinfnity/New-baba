@@ -18,7 +18,7 @@ class TrellisRepository(
     private val api: TrellisApi,
     /** Resolves the current API key — Settings first, BuildConfig fallback. */
     private val apiKeyProvider: () -> String
-) {
+) : Model3DRepository {
 
     private val modelsDir: File
         get() = File(context.filesDir, "models").apply { mkdirs() }
@@ -27,9 +27,9 @@ class TrellisRepository(
      * Sends [imageFile] to the NVIDIA TRELLIS endpoint and returns the generated .glb file.
      * Handles both the synchronous (200) and polled (202 + NVCF-REQID) response flows.
      */
-    suspend fun generateModel(
+    override suspend fun generateModel(
         imageFile: File,
-        onStatus: (String) -> Unit = {}
+        onStatus: (String) -> Unit
     ): File = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider()
         if (apiKey.isBlank()) {

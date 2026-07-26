@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.trellis.studio.App
 import com.trellis.studio.data.DownloadHelper
+import com.trellis.studio.data.Model3DProvider
 import com.trellis.studio.data.db.Generation
 import com.trellis.studio.data.toUserMessage
 import com.trellis.studio.ui.components.ErrorCard
@@ -81,6 +82,8 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _removeBgEnabled = MutableStateFlow(true)
     val removeBgEnabled: StateFlow<Boolean> = _removeBgEnabled
+
+    val provider: StateFlow<Model3DProvider> = container.settingsRepository.provider
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages: SharedFlow<String> = _messages
@@ -126,7 +129,7 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
         _genState.value = ModelGenState.Running("Preparing image…")
         viewModelScope.launch {
             runCatching {
-                container.trellisRepository.generateModel(File(path)) { status ->
+                container.model3DRepository.generateModel(File(path)) { status ->
                     _genState.value = ModelGenState.Running(status)
                 }
             }.onSuccess { modelFile ->
@@ -163,6 +166,7 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
     val genState by viewModel.genState.collectAsState()
     val isProcessingImage by viewModel.isProcessingImage.collectAsState()
     val removeBgEnabled by viewModel.removeBgEnabled.collectAsState()
+    val provider by viewModel.provider.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) { viewModel.consumePendingImage() }
@@ -188,7 +192,8 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                "Turn a single image into a textured 3D model with NVIDIA TRELLIS.",
+                "Turn a single image into a textured 3D model. Using: ${provider.label} " +
+                    "(change in Settings).",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

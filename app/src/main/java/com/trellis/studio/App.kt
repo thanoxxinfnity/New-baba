@@ -4,7 +4,10 @@ import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import com.trellis.studio.data.BackgroundRemover
+import com.trellis.studio.data.FalRepository
 import com.trellis.studio.data.ImageRepository
+import com.trellis.studio.data.Model3DProvider
+import com.trellis.studio.data.Model3DRepository
 import com.trellis.studio.data.SettingsRepository
 import com.trellis.studio.data.TrellisRepository
 import com.trellis.studio.data.api.PollinationsApi
@@ -68,7 +71,20 @@ class AppContainer(context: Context) {
         context.applicationContext,
         trellisApi,
         apiKeyProvider = {
-            settingsRepository.apiKey.value.ifBlank { BuildConfig.TRELLIS_API_KEY }
+            settingsRepository.nvidiaApiKey.value.ifBlank { BuildConfig.TRELLIS_API_KEY }
         }
     )
+
+    val falRepository = FalRepository(
+        context.applicationContext,
+        okHttpClient,
+        apiKeyProvider = { settingsRepository.falApiKey.value }
+    )
+
+    /** The currently active Image-to-3D backend, per the Settings provider choice. */
+    val model3DRepository: Model3DRepository
+        get() = when (settingsRepository.provider.value) {
+            Model3DProvider.NVIDIA_TRELLIS -> trellisRepository
+            Model3DProvider.FAL_TRELLIS -> falRepository
+        }
 }
