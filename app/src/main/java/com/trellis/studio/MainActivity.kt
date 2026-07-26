@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
@@ -27,6 +28,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.trellis.studio.ui.screens.CanvasScreen
+import com.trellis.studio.ui.screens.ChatHistoryScreen
+import com.trellis.studio.ui.screens.ChatScreen
 import com.trellis.studio.ui.screens.HistoryScreen
 import com.trellis.studio.ui.screens.ImageTo3dScreen
 import com.trellis.studio.ui.screens.SettingsScreen
@@ -39,6 +43,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private val tabs = listOf(
     Tab("text_to_image", "Image", Icons.Default.Image),
     Tab("image_to_3d", "3D", Icons.Default.ViewInAr),
+    Tab("chat", "Chat", Icons.AutoMirrored.Filled.Chat),
     Tab("history", "History", Icons.Default.History),
     Tab("settings", "Settings", Icons.Default.Settings)
 )
@@ -96,6 +101,36 @@ private fun MainScreen() {
             }
             composable("image_to_3d") {
                 ImageTo3dScreen()
+            }
+            composable("chat") {
+                ChatScreen(
+                    onOpenHistory = { navController.navigate("chat_history") },
+                    onOpenSessionRequest = null,
+                    onOpenCanvas = { navController.navigate("canvas") }
+                )
+            }
+            composable("chat_history") {
+                ChatHistoryScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenSession = { id ->
+                        navController.popBackStack()
+                        navController.navigate("chat_open/$id")
+                    }
+                )
+            }
+            composable(
+                "chat_open/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.LongType })
+            ) { entry ->
+                val id = entry.arguments?.getLong("id") ?: return@composable
+                ChatScreen(
+                    onOpenHistory = { navController.navigate("chat_history") },
+                    onOpenSessionRequest = id,
+                    onOpenCanvas = { navController.navigate("canvas") }
+                )
+            }
+            composable("canvas") {
+                CanvasScreen(onBack = { navController.popBackStack() })
             }
             composable("history") {
                 HistoryScreen(

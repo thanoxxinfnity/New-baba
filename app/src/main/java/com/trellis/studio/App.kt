@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import com.trellis.studio.data.BackgroundRemover
+import com.trellis.studio.data.ChatRepository
 import com.trellis.studio.data.FalRepository
 import com.trellis.studio.data.ImageRepository
 import com.trellis.studio.data.Model3DProvider
@@ -11,6 +12,7 @@ import com.trellis.studio.data.Model3DRepository
 import com.trellis.studio.data.PollinationsTrellisRepository
 import com.trellis.studio.data.SettingsRepository
 import com.trellis.studio.data.TrellisRepository
+import com.trellis.studio.data.VoiceSpeaker
 import com.trellis.studio.data.api.PollinationsApi
 import com.trellis.studio.data.api.TrellisApi
 import com.trellis.studio.data.db.AppDatabase
@@ -35,11 +37,18 @@ class AppContainer(context: Context) {
     /** One-shot handoff of an image from the Text-to-Image tab to the Image-to-3D tab. */
     var pendingImagePath: String? = null
 
+    /** One-shot handoff of a code block's content to the Canvas viewer. */
+    var pendingCanvasContent: Pair<String, String>? = null // language to code
+
     val database: AppDatabase = Room.databaseBuilder(
         context.applicationContext,
         AppDatabase::class.java,
         "trellis-studio.db"
-    ).build()
+    )
+        // Chat tables were added after the first release; no user data worth
+        // preserving across that schema bump yet, so drop and recreate.
+        .fallbackToDestructiveMigration()
+        .build()
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -95,4 +104,15 @@ class AppContainer(context: Context) {
             Model3DProvider.FAL_TRELLIS -> falRepository
             Model3DProvider.POLLINATIONS_TRELLIS -> pollinationsTrellisRepository
         }
+
+    // Chat reuses the NVIDIA key — same nvapi- key that powers TRELLIS also unlocks
+    // 100+ text/reasoning models on NVIDIA's OpenAI-compatible NIM endpoint.
+    val chatRepository = ChatRepository(
+        okHttpClient,
+        apiKeyProvider = {
+            settingsRepository.nvidiaApiKey.value.ifBlank { BuildConfig.TRELLIS_API_KEY }
+        }
+    )
+
+    val voiceSpeaker = VoiceSpeaker(context.applicationContext)
 }
