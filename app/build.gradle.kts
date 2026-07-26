@@ -26,7 +26,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Minified + shrunk so the APK stays small (material-icons-extended is
+            // huge unshrunk). Signed with the debug key so it can be sideloaded
+            // directly; replace with a real signing config for store distribution.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
