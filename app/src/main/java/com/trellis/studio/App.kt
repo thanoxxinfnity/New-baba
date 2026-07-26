@@ -8,6 +8,7 @@ import com.trellis.studio.data.FalRepository
 import com.trellis.studio.data.ImageRepository
 import com.trellis.studio.data.Model3DProvider
 import com.trellis.studio.data.Model3DRepository
+import com.trellis.studio.data.PollinationsTrellisRepository
 import com.trellis.studio.data.SettingsRepository
 import com.trellis.studio.data.TrellisRepository
 import com.trellis.studio.data.api.PollinationsApi
@@ -81,10 +82,17 @@ class AppContainer(context: Context) {
         apiKeyProvider = { settingsRepository.falApiKey.value }
     )
 
+    val pollinationsTrellisRepository = PollinationsTrellisRepository(
+        context.applicationContext,
+        okHttpClient,
+        apiKeyProvider = { settingsRepository.pollinationsApiKey.value }
+    )
+
     /** The currently active Image-to-3D backend, per the Settings provider choice. */
     val model3DRepository: Model3DRepository
         get() = when (settingsRepository.provider.value) {
             Model3DProvider.NVIDIA_TRELLIS -> trellisRepository
             Model3DProvider.FAL_TRELLIS -> falRepository
+            Model3DProvider.POLLINATIONS_TRELLIS -> pollinationsTrellisRepository
         }
 }

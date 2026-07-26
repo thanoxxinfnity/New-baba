@@ -16,6 +16,10 @@ class SettingsRepository(context: Context) {
     private val _falApiKey = MutableStateFlow(prefs.getString(KEY_FAL_API_KEY, "").orEmpty())
     val falApiKey: StateFlow<String> = _falApiKey
 
+    private val _pollinationsApiKey =
+        MutableStateFlow(prefs.getString(KEY_POLLINATIONS_API_KEY, "").orEmpty())
+    val pollinationsApiKey: StateFlow<String> = _pollinationsApiKey
+
     private val _provider = MutableStateFlow(
         runCatching {
             Model3DProvider.valueOf(prefs.getString(KEY_PROVIDER, null).orEmpty())
@@ -35,6 +39,12 @@ class SettingsRepository(context: Context) {
         _falApiKey.value = trimmed
     }
 
+    fun setPollinationsApiKey(key: String) {
+        val trimmed = key.trim()
+        prefs.edit { putString(KEY_POLLINATIONS_API_KEY, trimmed) }
+        _pollinationsApiKey.value = trimmed
+    }
+
     fun setProvider(provider: Model3DProvider) {
         prefs.edit { putString(KEY_PROVIDER, provider.name) }
         _provider.value = provider
@@ -43,6 +53,7 @@ class SettingsRepository(context: Context) {
     private companion object {
         const val KEY_NVIDIA_API_KEY = "nvidia_api_key"
         const val KEY_FAL_API_KEY = "fal_api_key"
+        const val KEY_POLLINATIONS_API_KEY = "pollinations_api_key"
         const val KEY_PROVIDER = "model3d_provider"
     }
 }

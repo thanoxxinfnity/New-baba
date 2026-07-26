@@ -63,10 +63,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun currentNvidiaKey() = settings.nvidiaApiKey.value
     fun currentFalKey() = settings.falApiKey.value
+    fun currentPollinationsKey() = settings.pollinationsApiKey.value
 
     fun setProvider(provider: Model3DProvider) = settings.setProvider(provider)
     fun saveNvidiaKey(key: String) = settings.setNvidiaApiKey(key)
     fun saveFalKey(key: String) = settings.setFalApiKey(key)
+    fun savePollinationsKey(key: String) = settings.setPollinationsApiKey(key)
 }
 
 @Composable
@@ -74,8 +76,10 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     val provider by viewModel.provider.collectAsState()
     var nvidiaKey by rememberSaveable { mutableStateOf(viewModel.currentNvidiaKey()) }
     var falKey by rememberSaveable { mutableStateOf(viewModel.currentFalKey()) }
+    var pollinationsKey by rememberSaveable { mutableStateOf(viewModel.currentPollinationsKey()) }
     var showNvidiaKey by rememberSaveable { mutableStateOf(false) }
     var showFalKey by rememberSaveable { mutableStateOf(false) }
+    var showPollinationsKey by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     var savedTick by remember { mutableStateOf(0) }
 
@@ -162,6 +166,23 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 }
             )
 
+            ApiKeyCard(
+                title = "Pollinations TRELLIS API key",
+                description = "Used only when \"Pollinations TRELLIS\" is selected above. Free " +
+                    "weekly Pollen credit, accepts real uploaded photos, AND supports pure " +
+                    "text-to-3D (no image needed — a text-only option appears on the Image-to-3D " +
+                    "screen when this provider is active). Get a key at enter.pollinations.ai/keys.",
+                keyValue = pollinationsKey,
+                onKeyChange = { pollinationsKey = it },
+                placeholder = "sk_… or pk_…",
+                showKey = showPollinationsKey,
+                onToggleShow = { showPollinationsKey = !showPollinationsKey },
+                onSave = {
+                    viewModel.savePollinationsKey(pollinationsKey)
+                    savedTick++
+                }
+            )
+
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
@@ -184,8 +205,9 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             "sample images, not photos you upload — this is documented by NVIDIA " +
                             "itself, not a bug in this app. It has also been intermittently " +
                             "returning server errors for other developers. If Image-to-3D fails " +
-                            "on NVIDIA, switch the provider above to fal.ai, which does accept " +
-                            "real photos today.",
+                            "on NVIDIA, switch the provider above to fal.ai or Pollinations, both " +
+                            "of which accept real photos today — Pollinations also has a free tier " +
+                            "and supports text-to-3D directly.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

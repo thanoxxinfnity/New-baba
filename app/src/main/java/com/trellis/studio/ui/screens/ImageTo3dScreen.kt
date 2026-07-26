@@ -28,7 +28,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -67,6 +69,8 @@ sealed interface ModelGenState {
     data class Error(val message: String) : ModelGenState
 }
 
+enum class InputMode { IMAGE, TEXT }
+
 class ImageTo3dViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as App).container
@@ -83,6 +87,12 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
     private val _removeBgEnabled = MutableStateFlow(true)
     val removeBgEnabled: StateFlow<Boolean> = _removeBgEnabled
 
+    private val _inputMode = MutableStateFlow(InputMode.IMAGE)
+    val inputMode: StateFlow<InputMode> = _inputMode
+
+    private val _textPrompt = MutableStateFlow("")
+    val textPrompt: StateFlow<String> = _textPrompt
+
     val provider: StateFlow<Model3DProvider> = container.settingsRepository.provider
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -90,6 +100,15 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setRemoveBgEnabled(enabled: Boolean) {
         _removeBgEnabled.value = enabled
+    }
+
+    fun setInputMode(mode: InputMode) {
+        _inputMode.value = mode
+        _genState.value = ModelGenState.Idle
+    }
+
+    fun setTextPrompt(prompt: String) {
+        _textPrompt.value = prompt
     }
 
     /** Picks up an image handed over from the Text-to-Image tab, if any. */
@@ -124,8 +143,16 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun generate() {
-        val path = _imagePath.value ?: return
         if (_genState.value is ModelGenState.Running) return
+        if (_inputMode.value == InputMode.TEXT) {
+            generateFromText()
+        } else {
+            generateFromImage()
+        }
+    }
+
+    private fun generateFromImage() {
+        val path = _imagePath.value ?: return
         _genState.value = ModelGenState.Running("Preparing image…")
         viewModelScope.launch {
             runCatching {
@@ -138,6 +165,32 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
                         type = Generation.TYPE_MODEL,
                         prompt = null,
                         imagePath = path,
+                        modelPath = modelFile.absolutePath,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+                _genState.value = ModelGenState.Success(modelFile.absolutePath)
+            }.onFailure {
+                _genState.value = ModelGenState.Error(it.toUserMessage())
+            }
+        }
+    }
+
+    private fun generateFromText() {
+        val prompt = _textPrompt.value.trim()
+        if (prompt.isEmpty()) return
+        _genState.value = ModelGenState.Running("Preparing…")
+        viewModelScope.launch {
+            runCatching {
+                container.model3DRepository.generateFromPrompt(prompt) { status ->
+                    _genState.value = ModelGenState.Running(status)
+                }
+            }.onSuccess { modelFile ->
+                container.database.generationDao().insert(
+                    Generation(
+                        type = Generation.TYPE_MODEL,
+                        prompt = prompt,
+                        imagePath = null,
                         modelPath = modelFile.absolutePath,
                         createdAt = System.currentTimeMillis()
                     )
@@ -167,7 +220,11 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
     val isProcessingImage by viewModel.isProcessingImage.collectAsState()
     val removeBgEnabled by viewModel.removeBgEnabled.collectAsState()
     val provider by viewModel.provider.collectAsState()
+    val inputMode by viewModel.inputMode.collectAsState()
+    val textPrompt by viewModel.textPrompt.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    // Only Pollinations currently implements real text-to-3D (see Model3DRepository).
+    val supportsTextTo3d = provider == Model3DProvider.POLLINATIONS_TRELLIS
 
     LaunchedEffect(Unit) { viewModel.consumePendingImage() }
     LaunchedEffect(Unit) {
@@ -198,88 +255,127 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // Source image preview / picker
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.4f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                val path = imagePath
-                if (isProcessingImage) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Removing background…",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else if (path != null) {
-                    AsyncImage(
-                        model = File(path),
-                        contentDescription = "Source image",
-                        modifier = Modifier.fillMaxSize()
+            if (supportsTextTo3d) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = inputMode == InputMode.IMAGE,
+                        onClick = { viewModel.setInputMode(InputMode.IMAGE) },
+                        label = { Text("From Image") }
                     )
-                } else {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "No image selected",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    FilterChip(
+                        selected = inputMode == InputMode.TEXT,
+                        onClick = { viewModel.setInputMode(InputMode.TEXT) },
+                        label = { Text("From Text") }
+                    )
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Remove background",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+            if (inputMode == InputMode.TEXT && supportsTextTo3d) {
+                OutlinedTextField(
+                    value = textPrompt,
+                    onValueChange = viewModel::setTextPrompt,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Describe the 3D model") },
+                    placeholder = { Text("A low-poly treasure chest with a gold lock") },
+                    minLines = 3,
+                    maxLines = 6
                 )
-                Switch(
-                    checked = removeBgEnabled,
-                    onCheckedChange = viewModel::setRemoveBgEnabled
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        pickImage.launch(
-                            PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.ImageOnly
-                            )
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Image, contentDescription = null)
-                    Spacer(Modifier.size(6.dp))
-                    Text("Pick Image")
-                }
                 Button(
                     onClick = { viewModel.generate() },
-                    modifier = Modifier.weight(1f),
-                    enabled = imagePath != null &&
-                        !isProcessingImage &&
-                        genState !is ModelGenState.Running
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled = textPrompt.isNotBlank() && genState !is ModelGenState.Running,
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(Icons.Default.ViewInAr, contentDescription = null)
-                    Spacer(Modifier.size(6.dp))
+                    Spacer(Modifier.size(8.dp))
                     Text("Generate 3D")
+                }
+            } else {
+                // Source image preview / picker
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1.4f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val path = imagePath
+                    if (isProcessingImage) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Removing background…",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else if (path != null) {
+                        AsyncImage(
+                            model = File(path),
+                            contentDescription = "Source image",
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.Image,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "No image selected",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Remove background",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Switch(
+                        checked = removeBgEnabled,
+                        onCheckedChange = viewModel::setRemoveBgEnabled
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            pickImage.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = null)
+                        Spacer(Modifier.size(6.dp))
+                        Text("Pick Image")
+                    }
+                    Button(
+                        onClick = { viewModel.generate() },
+                        modifier = Modifier.weight(1f),
+                        enabled = imagePath != null &&
+                            !isProcessingImage &&
+                            genState !is ModelGenState.Running
+                    ) {
+                        Icon(Icons.Default.ViewInAr, contentDescription = null)
+                        Spacer(Modifier.size(6.dp))
+                        Text("Generate 3D")
+                    }
                 }
             }
 
