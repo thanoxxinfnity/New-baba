@@ -72,12 +72,31 @@ class TrellisRepository(
         }
 
         if (!response.isSuccessful) {
-            val detail = response.errorBody()?.string()?.take(300).orEmpty()
+            val rawBody = response.errorBody()?.string().orEmpty()
+            val detail = runCatching { JSONObject(rawBody).optString("detail") }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+
             throw AppException.Api(
-                when (response.code()) {
-                    401, 403 -> "The NVIDIA API key was rejected. Check the key in Settings."
-                    429 -> "NVIDIA API rate limit reached. Wait a moment and retry."
-                    else -> "3D generation failed (HTTP ${response.code()}). $detail"
+                when {
+                    response.code() == 401 || response.code() == 403 ->
+                        "The NVIDIA API key was rejected. Check the key in Settings."
+
+                    response.code() == 429 ->
+                        "NVIDIA API rate limit reached. Wait a moment and retry."
+
+                    detail?.contains("example_id") == true ->
+                        "NVIDIA's free TRELLIS preview endpoint only accepts its own sample " +
+                            "images — it cannot process custom photos yet. This is a limit on " +
+                            "NVIDIA's side, not something this app can work around."
+
+                    response.code() == 500 ->
+                        "NVIDIA's TRELLIS service returned a server error. Their preview " +
+                            "endpoint has been unstable — please try again in a while."
+
+                    detail != null -> "3D generation failed: $detail"
+
+                    else -> "3D generation failed (HTTP ${response.code()}). " +
+                        rawBody.take(200)
                 }
             )
         }

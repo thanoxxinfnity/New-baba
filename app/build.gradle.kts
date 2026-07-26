@@ -98,4 +98,7 @@ dependencies {
 
     // 3D GLB rendering (Filament-based)
     implementation("io.github.sceneview:sceneview:2.2.1")
+
+    // On-device background removal (free, no API key, no network call)
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 }

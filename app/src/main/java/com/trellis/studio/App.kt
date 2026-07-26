@@ -3,6 +3,7 @@ package com.trellis.studio
 import android.app.Application
 import android.content.Context
 import androidx.room.Room
+import com.trellis.studio.data.BackgroundRemover
 import com.trellis.studio.data.ImageRepository
 import com.trellis.studio.data.SettingsRepository
 import com.trellis.studio.data.TrellisRepository
@@ -60,6 +61,8 @@ class AppContainer(context: Context) {
     val settingsRepository = SettingsRepository(context.applicationContext)
 
     val imageRepository = ImageRepository(context.applicationContext, pollinationsApi)
+
+    val backgroundRemover = BackgroundRemover(context.applicationContext)
 
     val trellisRepository = TrellisRepository(
         context.applicationContext,

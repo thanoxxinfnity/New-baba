@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -75,26 +76,47 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
     private val _genState = MutableStateFlow<ModelGenState>(ModelGenState.Idle)
     val genState: StateFlow<ModelGenState> = _genState
 
+    private val _isProcessingImage = MutableStateFlow(false)
+    val isProcessingImage: StateFlow<Boolean> = _isProcessingImage
+
+    private val _removeBgEnabled = MutableStateFlow(true)
+    val removeBgEnabled: StateFlow<Boolean> = _removeBgEnabled
+
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages: SharedFlow<String> = _messages
+
+    fun setRemoveBgEnabled(enabled: Boolean) {
+        _removeBgEnabled.value = enabled
+    }
 
     /** Picks up an image handed over from the Text-to-Image tab, if any. */
     fun consumePendingImage() {
         container.pendingImagePath?.let { path ->
             container.pendingImagePath = null
-            _imagePath.value = path
-            _genState.value = ModelGenState.Idle
+            setIncomingImage(File(path))
         }
     }
 
     fun onImagePicked(uri: Uri) {
         viewModelScope.launch {
             runCatching { container.imageRepository.importFromGallery(uri) }
-                .onSuccess {
-                    _imagePath.value = it.absolutePath
-                    _genState.value = ModelGenState.Idle
-                }
+                .onSuccess { setIncomingImage(it) }
                 .onFailure { _messages.tryEmit(it.toUserMessage()) }
+        }
+    }
+
+    private fun setIncomingImage(file: File) {
+        _genState.value = ModelGenState.Idle
+        if (!_removeBgEnabled.value) {
+            _imagePath.value = file.absolutePath
+            return
+        }
+        viewModelScope.launch {
+            _isProcessingImage.value = true
+            val processed = runCatching { container.backgroundRemover.removeBackground(file) }
+                .getOrDefault(file)
+            _imagePath.value = processed.absolutePath
+            _isProcessingImage.value = false
         }
     }
 
@@ -139,6 +161,8 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
 fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
     val imagePath by viewModel.imagePath.collectAsState()
     val genState by viewModel.genState.collectAsState()
+    val isProcessingImage by viewModel.isProcessingImage.collectAsState()
+    val removeBgEnabled by viewModel.removeBgEnabled.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) { viewModel.consumePendingImage() }
@@ -179,7 +203,16 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
                 contentAlignment = Alignment.Center
             ) {
                 val path = imagePath
-                if (path != null) {
+                if (isProcessingImage) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Removing background…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else if (path != null) {
                     AsyncImage(
                         model = File(path),
                         contentDescription = "Source image",
@@ -201,6 +234,22 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
                 }
             }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Remove background",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Switch(
+                    checked = removeBgEnabled,
+                    onCheckedChange = viewModel::setRemoveBgEnabled
+                )
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = {
@@ -219,7 +268,9 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
                 Button(
                     onClick = { viewModel.generate() },
                     modifier = Modifier.weight(1f),
-                    enabled = imagePath != null && genState !is ModelGenState.Running
+                    enabled = imagePath != null &&
+                        !isProcessingImage &&
+                        genState !is ModelGenState.Running
                 ) {
                     Icon(Icons.Default.ViewInAr, contentDescription = null)
                     Spacer(Modifier.size(6.dp))
