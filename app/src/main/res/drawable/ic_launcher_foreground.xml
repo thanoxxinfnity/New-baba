@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple isometric cube mark -->
+    <path
+        android:fillColor="#7C6CF0"
+        android:pathData="M54,26 L78,40 L54,54 L30,40 Z" />
+    <path
+        android:fillColor="#4E3FD0"
+        android:pathData="M30,40 L54,54 L54,82 L30,68 Z" />
+    <path
+        android:fillColor="#3A2FA8"
+        android:pathData="M78,40 L54,54 L54,82 L78,68 Z" />
+</vector>
