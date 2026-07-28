@@ -21,20 +21,26 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -213,8 +219,9 @@ class ImageTo3dViewModel(application: Application) : AndroidViewModel(applicatio
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
+fun ImageTo3dScreen(onBack: () -> Unit = {}, viewModel: ImageTo3dViewModel = viewModel()) {
     val imagePath by viewModel.imagePath.collectAsState()
     val genState by viewModel.genState.collectAsState()
     val isProcessingImage by viewModel.isProcessingImage.collectAsState()
@@ -235,19 +242,32 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let(viewModel::onImagePicked) }
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Image to 3D") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
     Box(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
+                .padding(padding)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                "Image to 3D",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onBackground
-            )
             Text(
                 "Turn a single image into a textured 3D model. Using: ${provider.label} " +
                     "(change in Settings).",
@@ -439,10 +459,6 @@ fun ImageTo3dScreen(viewModel: ImageTo3dViewModel = viewModel()) {
                 ModelGenState.Idle -> Unit
             }
         }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+    }
     }
 }

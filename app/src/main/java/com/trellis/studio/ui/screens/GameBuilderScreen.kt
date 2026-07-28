@@ -205,7 +205,7 @@ class GameBuilderViewModel(application: Application) : AndroidViewModel(applicat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GameBuilderScreen(viewModel: GameBuilderViewModel = viewModel()) {
+fun GameBuilderScreen(onBack: () -> Unit = {}, viewModel: GameBuilderViewModel = viewModel()) {
     val buildState   by viewModel.buildState.collectAsState()
     val dimension    by viewModel.dimension.collectAsState()
     val context      = LocalContext.current
@@ -230,6 +230,11 @@ fun GameBuilderScreen(viewModel: GameBuilderViewModel = viewModel()) {
                             style  = MaterialTheme.typography.labelSmall,
                             color  = MaterialTheme.colorScheme.primary
                         )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -465,7 +470,7 @@ private fun GameBuildForm(
             listOf("Rotating 3D cube", "Space flight", "3D maze runner", "Particle system")
         }
         Row(
-            modifier = Modifier.horizontalScrollState(),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             suggestions.forEach { s ->
@@ -517,9 +522,6 @@ private fun GameBuildForm(
         }
     }
 }
-
-@Composable
-private fun Modifier.horizontalScrollState() = horizontalScroll(rememberScrollState())
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
