@@ -1,6 +1,9 @@
 package com.trellis.studio.ui.screens
 
 import android.app.Application
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,13 +22,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.MicExternalOn
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +41,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +54,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -53,38 +64,68 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.App
 import com.trellis.studio.data.Model3DProvider
+import java.io.File
+import java.io.FileOutputStream
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as App).container
-    private val settings = container.settingsRepository
+    private val settings  = container.settingsRepository
 
-    val provider = settings.provider
+    val provider            = settings.provider
+    val nvidiaVoiceEnabled  = settings.nvidiaVoiceEnabled
+    val voiceCloneFilePath  = settings.voiceCloneFilePath
+    val voiceModel          = settings.voiceModel
 
-    fun currentNvidiaKey() = settings.nvidiaApiKey.value
-    fun currentFalKey() = settings.falApiKey.value
+    fun currentNvidiaKey()      = settings.nvidiaApiKey.value
+    fun currentFalKey()         = settings.falApiKey.value
     fun currentPollinationsKey() = settings.pollinationsApiKey.value
+    fun currentVoiceModel()     = settings.voiceModel.value
 
-    fun setProvider(provider: Model3DProvider) = settings.setProvider(provider)
-    fun saveNvidiaKey(key: String) = settings.setNvidiaApiKey(key)
-    fun saveFalKey(key: String) = settings.setFalApiKey(key)
+    fun setProvider(p: Model3DProvider)  = settings.setProvider(p)
+    fun saveNvidiaKey(key: String)       = settings.setNvidiaApiKey(key)
+    fun saveFalKey(key: String)          = settings.setFalApiKey(key)
     fun savePollinationsKey(key: String) = settings.setPollinationsApiKey(key)
+    fun setNvidiaVoiceEnabled(v: Boolean) = settings.setNvidiaVoiceEnabled(v)
+    fun setVoiceCloneFilePath(path: String?) = settings.setVoiceCloneFilePath(path)
+    fun saveVoiceModel(model: String)    = settings.setVoiceModel(model)
 }
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
-    val provider by viewModel.provider.collectAsState()
-    var nvidiaKey by rememberSaveable { mutableStateOf(viewModel.currentNvidiaKey()) }
-    var falKey by rememberSaveable { mutableStateOf(viewModel.currentFalKey()) }
+    val context             = LocalContext.current
+    val provider            by viewModel.provider.collectAsState()
+    val nvidiaVoiceEnabled  by viewModel.nvidiaVoiceEnabled.collectAsState()
+    val voiceCloneFilePath  by viewModel.voiceCloneFilePath.collectAsState()
+
+    var nvidiaKey       by rememberSaveable { mutableStateOf(viewModel.currentNvidiaKey()) }
+    var falKey          by rememberSaveable { mutableStateOf(viewModel.currentFalKey()) }
     var pollinationsKey by rememberSaveable { mutableStateOf(viewModel.currentPollinationsKey()) }
-    var showNvidiaKey by rememberSaveable { mutableStateOf(false) }
-    var showFalKey by rememberSaveable { mutableStateOf(false) }
-    var showPollinationsKey by rememberSaveable { mutableStateOf(false) }
+    var voiceModel      by rememberSaveable { mutableStateOf(viewModel.currentVoiceModel()) }
+    var showNvidiaKey   by rememberSaveable { mutableStateOf(false) }
+    var showFalKey      by rememberSaveable { mutableStateOf(false) }
+    var showPollinKey   by rememberSaveable { mutableStateOf(false) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     var savedTick by remember { mutableStateOf(0) }
 
     LaunchedEffect(savedTick) {
         if (savedTick > 0) snackbarHostState.showSnackbar("Saved ✔")
+    }
+
+    // Voice sample picker (audio files)
+    val voicePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val ext  = context.contentResolver.getType(uri)?.substringAfterLast('/') ?: "mp3"
+            val dest = File(context.filesDir, "voice_clone_reference.$ext")
+            context.contentResolver.openInputStream(uri)?.use { ins ->
+                FileOutputStream(dest).use { out -> ins.copyTo(out) }
+            }
+            viewModel.setVoiceCloneFilePath(dest.absolutePath)
+            savedTick++
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -101,94 +142,229 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Image-to-3D provider", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Pick which service generates the 3D model. Each has its own key below.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+            // ── NVIDIA NIM API Key ──────────────────────────────────────────
+            SectionCard(title = "NVIDIA NIM API Key") {
+                Text(
+                    "One nvapi- key powers everything: LLM chat (100+ models), image-to-3D," +
+                        " voice synthesis, and vision. Free tier at build.nvidia.com.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                SecretField(
+                    value       = nvidiaKey,
+                    onValueChange = { nvidiaKey = it },
+                    label       = "API Key (nvapi-…)",
+                    show        = showNvidiaKey,
+                    onToggle    = { showNvidiaKey = !showNvidiaKey }
+                )
+                Spacer(Modifier.height(8.dp))
+                SaveButton {
+                    viewModel.saveNvidiaKey(nvidiaKey)
+                    savedTick++
+                }
+            }
+
+            // ── Voice Clone (NVIDIA NIM TTS) ────────────────────────────────
+            SectionCard(title = "Voice & Voice Cloning") {
+                Text(
+                    "Enable NVIDIA NIM voice synthesis. Upload a sample (MP3/WAV) to clone your voice.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.GraphicEq,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
                     )
-                    Column(Modifier.selectableGroup()) {
-                        Model3DProvider.entries.forEach { option ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .selectable(
-                                        selected = provider == option,
-                                        onClick = { viewModel.setProvider(option) },
-                                        role = Role.RadioButton
-                                    )
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(selected = provider == option, onClick = null)
-                                Spacer(Modifier.size(8.dp))
-                                Text(option.label, style = MaterialTheme.typography.bodyLarge)
-                            }
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        "NVIDIA NIM Voice",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = nvidiaVoiceEnabled,
+                        onCheckedChange = { viewModel.setNvidiaVoiceEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor  = MaterialTheme.colorScheme.onPrimary,
+                            checkedTrackColor  = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = voiceModel,
+                    onValueChange = { voiceModel = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Voice model") },
+                    placeholder = { Text("elevenlabs/eleven-multilingual-v2") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Default.RecordVoiceOver, contentDescription = null)
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                SaveButton {
+                    viewModel.saveVoiceModel(voiceModel)
+                    savedTick++
+                }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    "Voice Clone Reference",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(Modifier.height(4.dp))
+
+                if (voiceCloneFilePath != null) {
+                    val fileName = voiceCloneFilePath?.substringAfterLast('/') ?: "voice sample"
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.MicExternalOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            fileName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { voicePickerLauncher.launch("audio/*") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.MicExternalOn, contentDescription = null,
+                            modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Upload Sample")
+                    }
+                    if (voiceCloneFilePath != null) {
+                        Button(
+                            onClick = { viewModel.setVoiceCloneFilePath(null) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                "Clear",
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Supported formats: MP3, WAV, OGG · 10–30 seconds of clear speech works best",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // ── Image-to-3D Provider ────────────────────────────────────────
+            SectionCard(title = "Image-to-3D Provider") {
+                Text(
+                    "Choose the backend for 3D model generation.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Column(Modifier.selectableGroup()) {
+                    Model3DProvider.entries.forEach { option ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = provider == option,
+                                    onClick  = { viewModel.setProvider(option) },
+                                    role     = Role.RadioButton
+                                )
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = provider == option, onClick = null)
+                            Spacer(Modifier.size(8.dp))
+                            Text(option.label, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
             }
 
-            ApiKeyCard(
-                title = "NVIDIA TRELLIS API key",
-                description = "Used only when \"NVIDIA TRELLIS\" is selected above. Free key at " +
-                    "build.nvidia.com (microsoft/trellis) — starts with \"nvapi-\". Note: NVIDIA's " +
-                    "free preview currently only accepts its own sample images and has been " +
-                    "returning server errors — see the notice below.",
-                keyValue = nvidiaKey,
-                onKeyChange = { nvidiaKey = it },
-                placeholder = "nvapi-…",
-                showKey = showNvidiaKey,
-                onToggleShow = { showNvidiaKey = !showNvidiaKey },
-                onSave = {
-                    viewModel.saveNvidiaKey(nvidiaKey)
-                    savedTick++
-                }
-            )
+            // ── fal.ai Key ──────────────────────────────────────────────────
+            SectionCard(title = "fal.ai TRELLIS Key") {
+                Text(
+                    "Used when fal.ai TRELLIS is selected above. Format: key_id:key_secret",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                SecretField(
+                    value       = falKey,
+                    onValueChange = { falKey = it },
+                    label       = "fal.ai Key",
+                    placeholder = "key_id:key_secret",
+                    show        = showFalKey,
+                    onToggle    = { showFalKey = !showFalKey }
+                )
+                Spacer(Modifier.height(8.dp))
+                SaveButton { viewModel.saveFalKey(falKey); savedTick++ }
+            }
 
-            ApiKeyCard(
-                title = "fal.ai TRELLIS API key",
-                description = "Used only when \"fal.ai TRELLIS\" is selected above. Paid, " +
-                    "pay-per-use — accepts real uploaded photos. Get a key at " +
-                    "fal.ai/dashboard/keys, format \"key_id:key_secret\".",
-                keyValue = falKey,
-                onKeyChange = { falKey = it },
-                placeholder = "key_id:key_secret",
-                showKey = showFalKey,
-                onToggleShow = { showFalKey = !showFalKey },
-                onSave = {
-                    viewModel.saveFalKey(falKey)
-                    savedTick++
-                }
-            )
+            // ── Pollinations Key ────────────────────────────────────────────
+            SectionCard(title = "Pollinations TRELLIS Key") {
+                Text(
+                    "Used when Pollinations TRELLIS is selected. Free weekly Pollen credit. Format: sk_… or pk_…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                SecretField(
+                    value       = pollinationsKey,
+                    onValueChange = { pollinationsKey = it },
+                    label       = "Pollinations Key",
+                    placeholder = "sk_… or pk_…",
+                    show        = showPollinKey,
+                    onToggle    = { showPollinKey = !showPollinKey }
+                )
+                Spacer(Modifier.height(8.dp))
+                SaveButton { viewModel.savePollinationsKey(pollinationsKey); savedTick++ }
+            }
 
-            ApiKeyCard(
-                title = "Pollinations TRELLIS API key",
-                description = "Used only when \"Pollinations TRELLIS\" is selected above. Free " +
-                    "weekly Pollen credit, accepts real uploaded photos, AND supports pure " +
-                    "text-to-3D (no image needed — a text-only option appears on the Image-to-3D " +
-                    "screen when this provider is active). Get a key at enter.pollinations.ai/keys.",
-                keyValue = pollinationsKey,
-                onKeyChange = { pollinationsKey = it },
-                placeholder = "sk_… or pk_…",
-                showKey = showPollinationsKey,
-                onToggleShow = { showPollinationsKey = !showPollinationsKey },
-                onSave = {
-                    viewModel.savePollinationsKey(pollinationsKey)
-                    savedTick++
-                }
-            )
-
+            // ── Info Card ───────────────────────────────────────────────────
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
                 )
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -198,16 +374,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary
                         )
-                        Text("About NVIDIA TRELLIS right now", style = MaterialTheme.typography.titleSmall)
+                        Text("About NVIDIA NIM", style = MaterialTheme.typography.titleSmall)
                     }
                     Text(
-                        "NVIDIA's free/preview TRELLIS endpoint currently only accepts its own " +
-                            "sample images, not photos you upload — this is documented by NVIDIA " +
-                            "itself, not a bug in this app. It has also been intermittently " +
-                            "returning server errors for other developers. If Image-to-3D fails " +
-                            "on NVIDIA, switch the provider above to fal.ai or Pollinations, both " +
-                            "of which accept real photos today — Pollinations also has a free tier " +
-                            "and supports text-to-3D directly.",
+                        "The NVIDIA NIM endpoint (integrate.api.nvidia.com) gives access to 100+ " +
+                            "LLMs, vision, reasoning, and voice models — all with one nvapi- key. " +
+                            "Voice cloning availability depends on which audio models NVIDIA NIM " +
+                            "exposes on your account tier. The free tier covers ~40 req/min.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -215,8 +388,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
             }
 
             Text(
-                "TRELLIS 3D Studio v1.0\nImages: Pollinations FLUX (free, no key) • " +
-                    "3D: NVIDIA TRELLIS or fal.ai TRELLIS (key required, above)",
+                "NIM AI Agent v2.0  ·  Chat: NVIDIA NIM  ·  Images: Pollinations FLUX (free)  ·  3D: NVIDIA / fal.ai / Pollinations",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -230,60 +402,64 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
 }
 
 @Composable
-private fun ApiKeyCard(
-    title: String,
-    description: String,
-    keyValue: String,
-    onKeyChange: (String) -> Unit,
-    placeholder: String,
-    showKey: Boolean,
-    onToggleShow: () -> Unit,
-    onSave: () -> Unit
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground)
+            Spacer(Modifier.height(4.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String = "",
+    show: Boolean,
+    onToggle: () -> Unit
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            OutlinedTextField(
-                value = keyValue,
-                onValueChange = onKeyChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API key") },
-                placeholder = { Text(placeholder) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                visualTransformation = if (showKey) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
-                leadingIcon = { Icon(Icons.Default.Key, contentDescription = null) },
-                trailingIcon = {
-                    IconButton(onClick = onToggleShow) {
-                        Icon(
-                            if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = if (showKey) "Hide key" else "Show key"
-                        )
-                    }
-                }
-            )
-
-            Button(
-                onClick = onSave,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Default.Check, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Save")
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        placeholder = { if (placeholder.isNotBlank()) Text(placeholder) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        visualTransformation = if (show) VisualTransformation.None
+                               else PasswordVisualTransformation(),
+        leadingIcon  = { Icon(Icons.Default.Key, contentDescription = null) },
+        trailingIcon = {
+            IconButton(onClick = onToggle) {
+                Icon(
+                    if (show) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = if (show) "Hide" else "Show"
+                )
             }
         }
+    )
+}
+
+@Composable
+private fun SaveButton(onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.size(8.dp))
+        Text("Save")
     }
 }

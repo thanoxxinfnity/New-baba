@@ -9,6 +9,7 @@ import com.trellis.studio.data.FalRepository
 import com.trellis.studio.data.ImageRepository
 import com.trellis.studio.data.Model3DProvider
 import com.trellis.studio.data.Model3DRepository
+import com.trellis.studio.data.NvidiaVoiceRepository
 import com.trellis.studio.data.PollinationsTrellisRepository
 import com.trellis.studio.data.SettingsRepository
 import com.trellis.studio.data.TrellisRepository
@@ -34,19 +35,14 @@ class App : Application() {
 
 class AppContainer(context: Context) {
 
-    /** One-shot handoff of an image from the Text-to-Image tab to the Image-to-3D tab. */
     var pendingImagePath: String? = null
-
-    /** One-shot handoff of a code block's content to the Canvas viewer. */
-    var pendingCanvasContent: Pair<String, String>? = null // language to code
+    var pendingCanvasContent: Pair<String, String>? = null
 
     val database: AppDatabase = Room.databaseBuilder(
         context.applicationContext,
         AppDatabase::class.java,
         "trellis-studio.db"
     )
-        // Chat tables were added after the first release; no user data worth
-        // preserving across that schema bump yet, so drop and recreate.
         .fallbackToDestructiveMigration()
         .build()
 
@@ -97,16 +93,13 @@ class AppContainer(context: Context) {
         apiKeyProvider = { settingsRepository.pollinationsApiKey.value }
     )
 
-    /** The currently active Image-to-3D backend, per the Settings provider choice. */
     val model3DRepository: Model3DRepository
         get() = when (settingsRepository.provider.value) {
-            Model3DProvider.NVIDIA_TRELLIS -> trellisRepository
-            Model3DProvider.FAL_TRELLIS -> falRepository
+            Model3DProvider.NVIDIA_TRELLIS     -> trellisRepository
+            Model3DProvider.FAL_TRELLIS        -> falRepository
             Model3DProvider.POLLINATIONS_TRELLIS -> pollinationsTrellisRepository
         }
 
-    // Chat reuses the NVIDIA key — same nvapi- key that powers TRELLIS also unlocks
-    // 100+ text/reasoning models on NVIDIA's OpenAI-compatible NIM endpoint.
     val chatRepository = ChatRepository(
         okHttpClient,
         apiKeyProvider = {
@@ -114,5 +107,17 @@ class AppContainer(context: Context) {
         }
     )
 
-    val voiceSpeaker = VoiceSpeaker(context.applicationContext)
+    val nvidiaVoiceRepository = NvidiaVoiceRepository(
+        context    = context.applicationContext,
+        okHttpClient = okHttpClient,
+        apiKeyProvider   = { settingsRepository.nvidiaApiKey.value },
+        voiceFileProvider = { settingsRepository.voiceCloneFilePath.value },
+        voiceModelProvider = { settingsRepository.voiceModel.value }
+    )
+
+    val voiceSpeaker = VoiceSpeaker(
+        context = context.applicationContext,
+        nvidiaVoiceRepository = nvidiaVoiceRepository,
+        nvidiaVoiceEnabledProvider = { settingsRepository.nvidiaVoiceEnabled.value }
+    )
 }

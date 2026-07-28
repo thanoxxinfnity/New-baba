@@ -5,7 +5,6 @@ import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** Stores user settings — the active 3D provider and its API keys — locally on the device. */
 class SettingsRepository(context: Context) {
 
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -26,6 +25,22 @@ class SettingsRepository(context: Context) {
         }.getOrDefault(Model3DProvider.NVIDIA_TRELLIS)
     )
     val provider: StateFlow<Model3DProvider> = _provider
+
+    /** Path to a voice audio file the user uploaded for voice-clone TTS. */
+    private val _voiceCloneFilePath =
+        MutableStateFlow(prefs.getString(KEY_VOICE_CLONE_PATH, null))
+    val voiceCloneFilePath: StateFlow<String?> = _voiceCloneFilePath
+
+    /** When true, NVIDIA NIM voice synthesis (with optional clone) is used over Android TTS. */
+    private val _nvidiaVoiceEnabled =
+        MutableStateFlow(prefs.getBoolean(KEY_NVIDIA_VOICE_ENABLED, false))
+    val nvidiaVoiceEnabled: StateFlow<Boolean> = _nvidiaVoiceEnabled
+
+    /** Selected NVIDIA voice model for TTS. */
+    private val _voiceModel = MutableStateFlow(
+        prefs.getString(KEY_VOICE_MODEL, DEFAULT_VOICE_MODEL).orEmpty()
+    )
+    val voiceModel: StateFlow<String> = _voiceModel
 
     fun setNvidiaApiKey(key: String) {
         val trimmed = key.trim()
@@ -50,10 +65,29 @@ class SettingsRepository(context: Context) {
         _provider.value = provider
     }
 
+    fun setVoiceCloneFilePath(path: String?) {
+        prefs.edit { if (path != null) putString(KEY_VOICE_CLONE_PATH, path) else remove(KEY_VOICE_CLONE_PATH) }
+        _voiceCloneFilePath.value = path
+    }
+
+    fun setNvidiaVoiceEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_NVIDIA_VOICE_ENABLED, enabled) }
+        _nvidiaVoiceEnabled.value = enabled
+    }
+
+    fun setVoiceModel(model: String) {
+        prefs.edit { putString(KEY_VOICE_MODEL, model) }
+        _voiceModel.value = model
+    }
+
     private companion object {
-        const val KEY_NVIDIA_API_KEY = "nvidia_api_key"
-        const val KEY_FAL_API_KEY = "fal_api_key"
-        const val KEY_POLLINATIONS_API_KEY = "pollinations_api_key"
-        const val KEY_PROVIDER = "model3d_provider"
+        const val KEY_NVIDIA_API_KEY        = "nvidia_api_key"
+        const val KEY_FAL_API_KEY           = "fal_api_key"
+        const val KEY_POLLINATIONS_API_KEY  = "pollinations_api_key"
+        const val KEY_PROVIDER              = "model3d_provider"
+        const val KEY_VOICE_CLONE_PATH      = "voice_clone_file_path"
+        const val KEY_NVIDIA_VOICE_ENABLED  = "nvidia_voice_enabled"
+        const val KEY_VOICE_MODEL           = "nvidia_voice_model"
+        const val DEFAULT_VOICE_MODEL       = "elevenlabs/eleven-multilingual-v2"
     }
 }

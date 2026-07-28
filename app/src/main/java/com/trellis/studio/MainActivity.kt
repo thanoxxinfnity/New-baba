@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +35,7 @@ import com.trellis.studio.ui.screens.ChatScreen
 import com.trellis.studio.ui.screens.HistoryScreen
 import com.trellis.studio.ui.screens.ImageTo3dScreen
 import com.trellis.studio.ui.screens.SettingsScreen
+import com.trellis.studio.ui.screens.TerminalScreen
 import com.trellis.studio.ui.screens.TextToImageScreen
 import com.trellis.studio.ui.screens.ViewerScreen
 import com.trellis.studio.ui.theme.TrellisTheme
@@ -41,11 +43,12 @@ import com.trellis.studio.ui.theme.TrellisTheme
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    Tab("text_to_image", "Image", Icons.Default.Image),
-    Tab("image_to_3d", "3D", Icons.Default.ViewInAr),
-    Tab("chat", "Chat", Icons.AutoMirrored.Filled.Chat),
-    Tab("history", "History", Icons.Default.History),
-    Tab("settings", "Settings", Icons.Default.Settings)
+    Tab("chat",         "Chat",     Icons.AutoMirrored.Filled.Chat),
+    Tab("text_to_image","Image",    Icons.Default.Image),
+    Tab("image_to_3d", "3D",       Icons.Default.ViewInAr),
+    Tab("terminal",    "Terminal", Icons.Default.Terminal),
+    Tab("history",     "History",  Icons.Default.History),
+    Tab("settings",    "Settings", Icons.Default.Settings)
 )
 
 class MainActivity : ComponentActivity() {
@@ -82,9 +85,9 @@ private fun MainScreen() {
                     tabs.forEach { tab ->
                         NavigationBarItem(
                             selected = currentRoute == tab.route,
-                            onClick = { navigateToTab(tab.route) },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label) }
+                            onClick  = { navigateToTab(tab.route) },
+                            icon     = { Icon(tab.icon, contentDescription = tab.label) },
+                            label    = { Text(tab.label) }
                         )
                     }
                 }
@@ -92,21 +95,15 @@ private fun MainScreen() {
         }
     ) { padding ->
         NavHost(
-            navController = navController,
-            startDestination = "text_to_image",
-            modifier = Modifier.padding(padding)
+            navController    = navController,
+            startDestination = "chat",
+            modifier         = Modifier.padding(padding)
         ) {
-            composable("text_to_image") {
-                TextToImageScreen(onNavigateTo3d = { navigateToTab("image_to_3d") })
-            }
-            composable("image_to_3d") {
-                ImageTo3dScreen()
-            }
             composable("chat") {
                 ChatScreen(
-                    onOpenHistory = { navController.navigate("chat_history") },
+                    onOpenHistory       = { navController.navigate("chat_history") },
                     onOpenSessionRequest = null,
-                    onOpenCanvas = { navController.navigate("canvas") }
+                    onOpenCanvas        = { navController.navigate("canvas") }
                 )
             }
             composable("chat_history") {
@@ -124,17 +121,26 @@ private fun MainScreen() {
             ) { entry ->
                 val id = entry.arguments?.getLong("id") ?: return@composable
                 ChatScreen(
-                    onOpenHistory = { navController.navigate("chat_history") },
+                    onOpenHistory       = { navController.navigate("chat_history") },
                     onOpenSessionRequest = id,
-                    onOpenCanvas = { navController.navigate("canvas") }
+                    onOpenCanvas        = { navController.navigate("canvas") }
                 )
             }
             composable("canvas") {
                 CanvasScreen(onBack = { navController.popBackStack() })
             }
+            composable("text_to_image") {
+                TextToImageScreen(onNavigateTo3d = { navigateToTab("image_to_3d") })
+            }
+            composable("image_to_3d") {
+                ImageTo3dScreen()
+            }
+            composable("terminal") {
+                TerminalScreen()
+            }
             composable("history") {
                 HistoryScreen(
-                    onOpenViewer = { id -> navController.navigate("viewer/$id") },
+                    onOpenViewer   = { id -> navController.navigate("viewer/$id") },
                     onNavigateTo3d = { navigateToTab("image_to_3d") }
                 )
             }
@@ -148,7 +154,7 @@ private fun MainScreen() {
                 val id = entry.arguments?.getLong("id") ?: return@composable
                 ViewerScreen(
                     generationId = id,
-                    onBack = { navController.popBackStack() }
+                    onBack       = { navController.popBackStack() }
                 )
             }
         }

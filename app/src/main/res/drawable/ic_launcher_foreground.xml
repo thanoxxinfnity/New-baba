@@ -4,14 +4,72 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Simple isometric cube mark -->
+    <!-- Outer ring -->
     <path
-        android:fillColor="#7C6CF0"
-        android:pathData="M54,26 L78,40 L54,54 L30,40 Z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#CF7A4F"
+        android:strokeWidth="3"
+        android:pathData="M54,20 A34,34 0 1,1 53.99,20 Z" />
+    <!-- Brain/neural center node -->
     <path
-        android:fillColor="#4E3FD0"
-        android:pathData="M30,40 L54,54 L54,82 L30,68 Z" />
+        android:fillColor="#CF7A4F"
+        android:pathData="M54,42 A12,12 0 1,1 53.99,42 Z" />
+    <!-- Neural branches -->
     <path
-        android:fillColor="#3A2FA8"
-        android:pathData="M78,40 L54,54 L54,82 L78,68 Z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#CF7A4F"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,30 L54,20" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#CF7A4F"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,78 L54,66" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#CF7A4F"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M20,54 L42,54" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#CF7A4F"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M66,54 L88,54" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D4A25A"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M37,37 L46,46" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D4A25A"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M71,37 L62,46" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D4A25A"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M37,71 L46,62" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D4A25A"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M71,71 L62,62" />
+    <!-- Outer nodes -->
+    <path android:fillColor="#D4A25A" android:pathData="M54,16 A4,4 0 1,1 53.99,16 Z" />
+    <path android:fillColor="#D4A25A" android:pathData="M54,88 A4,4 0 1,1 53.99,88 Z" />
+    <path android:fillColor="#D4A25A" android:pathData="M16,54 A4,4 0 1,1 15.99,54 Z" />
+    <path android:fillColor="#D4A25A" android:pathData="M92,54 A4,4 0 1,1 91.99,54 Z" />
+    <path android:fillColor="#CF7A4F" android:pathData="M33,33 A3.5,3.5 0 1,1 32.99,33 Z" />
+    <path android:fillColor="#CF7A4F" android:pathData="M75,33 A3.5,3.5 0 1,1 74.99,33 Z" />
+    <path android:fillColor="#CF7A4F" android:pathData="M33,75 A3.5,3.5 0 1,1 32.99,75 Z" />
+    <path android:fillColor="#CF7A4F" android:pathData="M75,75 A3.5,3.5 0 1,1 74.99,75 Z" />
 </vector>

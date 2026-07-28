@@ -1,7 +1,12 @@
 package com.trellis.studio.ui.screens
 
 import android.app.Application
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,12 +25,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -44,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -63,15 +72,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.rememberAsyncImagePainter
 import com.trellis.studio.App
+import com.trellis.studio.data.ChatHistoryEntry
 import com.trellis.studio.data.ChatModelInfo
 import com.trellis.studio.data.ChatStreamEvent
 import com.trellis.studio.data.db.ChatMessageEntity
@@ -87,19 +101,22 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 data class ChatUiMessage(
     val id: Long,
     val role: String,
     val content: String,
     val reasoningContent: String,
-    val isStreaming: Boolean
+    val isStreaming: Boolean,
+    val imagePath: String? = null
 )
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as App).container
-    private val dao = container.database.chatDao()
+    private val dao       = container.database.chatDao()
 
     private val _sessionId = MutableStateFlow<Long?>(null)
     val sessionId: StateFlow<Long?> = _sessionId
@@ -113,7 +130,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val messages: StateFlow<List<ChatUiMessage>> =
         combine(persistedMessages, _streamingMessage) { persisted, streaming ->
             persisted.map {
-                ChatUiMessage(it.id, it.role, it.content, it.reasoningContent.orEmpty(), false)
+                ChatUiMessage(it.id, it.role, it.content, it.reasoningContent.orEmpty(), false, it.imagePath)
             } + listOfNotNull(streaming)
         }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -123,18 +140,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _availableModels = MutableStateFlow<List<ChatModelInfo>>(emptyList())
     val availableModels: StateFlow<List<ChatModelInfo>> = _availableModels
 
-    private val _isSending = MutableStateFlow(false)
+    private val _isSending         = MutableStateFlow(false)
     val isSending: StateFlow<Boolean> = _isSending
 
     private val _isGeneratingImage = MutableStateFlow(false)
     val isGeneratingImage: StateFlow<Boolean> = _isGeneratingImage
 
+    private val _isSpeaking        = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking
+
     private val _errorMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val errorMessage: SharedFlow<String> = _errorMessage
 
-    init {
-        loadModels()
-    }
+    init { loadModels() }
 
     fun loadModels(forceRefresh: Boolean = false) {
         viewModelScope.launch {
@@ -154,28 +172,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _streamingMessage.value = null
     }
 
-    fun setModel(model: String) {
-        _selectedModel.value = model
+    fun setModel(model: String) { _selectedModel.value = model }
+
+    fun speak(text: String) {
+        _isSpeaking.value = true
+        container.voiceSpeaker.speak(text)
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(500)
+            _isSpeaking.value = false
+        }
     }
 
-    fun speak(text: String) = container.voiceSpeaker.speak(text)
-    fun stopSpeaking() = container.voiceSpeaker.stop()
+    fun stopSpeaking() {
+        container.voiceSpeaker.stop()
+        _isSpeaking.value = false
+    }
 
     fun openInCanvas(language: String, code: String) {
         container.pendingCanvasContent = language to code
     }
 
-    fun sendMessage(text: String) {
+    fun sendMessage(text: String, imagePath: String? = null) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || _isSending.value) return
+        if (trimmed.isEmpty() && imagePath == null) return
+        if (_isSending.value) return
 
         viewModelScope.launch {
-            val historyBeforeThis = persistedMessages.value.map { it.role to it.content }
+            val historyBeforeThis = persistedMessages.value.map {
+                ChatHistoryEntry(it.role, it.content, it.imagePath)
+            }
 
             val sid = _sessionId.value ?: run {
                 val newId = dao.insertSession(
                     com.trellis.studio.data.db.ChatSession(
-                        title = trimmed.take(48),
+                        title = trimmed.take(48).ifBlank { "Image chat" },
                         model = _selectedModel.value,
                         createdAt = System.currentTimeMillis()
                     )
@@ -183,13 +213,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _sessionId.value = newId
                 newId
             }
+
             dao.insertMessage(
                 ChatMessageEntity(
-                    sessionId = sid,
-                    role = ChatMessageEntity.ROLE_USER,
-                    content = trimmed,
+                    sessionId  = sid,
+                    role       = ChatMessageEntity.ROLE_USER,
+                    content    = trimmed,
                     reasoningContent = null,
-                    createdAt = System.currentTimeMillis()
+                    createdAt  = System.currentTimeMillis(),
+                    imagePath  = imagePath
                 )
             )
 
@@ -199,13 +231,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 content = "", reasoningContent = "", isStreaming = true
             )
 
-            val contentBuilder = StringBuilder()
+            val contentBuilder   = StringBuilder()
             val reasoningBuilder = StringBuilder()
             var streamError: String? = null
 
+            val newEntry = ChatHistoryEntry(ChatMessageEntity.ROLE_USER, trimmed, imagePath)
             container.chatRepository.streamChat(
                 _selectedModel.value,
-                historyBeforeThis + (ChatMessageEntity.ROLE_USER to trimmed)
+                historyBeforeThis + newEntry
             ).collect { event ->
                 when (event) {
                     is ChatStreamEvent.ContentDelta -> {
@@ -223,7 +256,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     is ChatStreamEvent.Error -> streamError = event.message
-                    ChatStreamEvent.Done -> Unit
+                    ChatStreamEvent.Done    -> Unit
                 }
             }
 
@@ -232,17 +265,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 dao.insertMessage(
                     ChatMessageEntity(
-                        sessionId = sid,
-                        role = ChatMessageEntity.ROLE_ASSISTANT,
-                        content = contentBuilder.toString(),
+                        sessionId  = sid,
+                        role       = ChatMessageEntity.ROLE_ASSISTANT,
+                        content    = contentBuilder.toString(),
                         reasoningContent = reasoningBuilder.toString().ifBlank { null },
-                        createdAt = System.currentTimeMillis()
+                        createdAt  = System.currentTimeMillis()
                     )
                 )
                 streamError?.let { _errorMessage.tryEmit(it) }
             }
-            // Give Room's Flow a beat to emit the freshly-inserted row before dropping
-            // the in-memory streaming overlay, so the message doesn't flicker away.
             kotlinx.coroutines.delay(80)
             _streamingMessage.value = null
             _isSending.value = false
@@ -266,7 +297,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             dao.insertMessage(
                 ChatMessageEntity(
                     sessionId = sid, role = ChatMessageEntity.ROLE_USER,
-                    content = "Generate an image: $prompt", reasoningContent = null,
+                    content = "Generate image: $prompt", reasoningContent = null,
                     createdAt = System.currentTimeMillis()
                 )
             )
@@ -287,8 +318,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        const val DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
-        const val STREAMING_ID = -1L
+        const val DEFAULT_MODEL  = "meta/llama-3.3-70b-instruct"
+        const val STREAMING_ID   = -1L
     }
 }
 
@@ -300,15 +331,34 @@ fun ChatScreen(
     onOpenCanvas: () -> Unit,
     viewModel: ChatViewModel = viewModel()
 ) {
-    val messages by viewModel.messages.collectAsState()
-    val selectedModel by viewModel.selectedModel.collectAsState()
-    val availableModels by viewModel.availableModels.collectAsState()
-    val isSending by viewModel.isSending.collectAsState()
-    val isGeneratingImage by viewModel.isGeneratingImage.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val listState = rememberLazyListState()
-    var input by rememberSaveable { mutableStateOf("") }
-    var modelMenuExpanded by remember { mutableStateOf(false) }
+    val context            = LocalContext.current
+    val messages           by viewModel.messages.collectAsState()
+    val selectedModel      by viewModel.selectedModel.collectAsState()
+    val availableModels    by viewModel.availableModels.collectAsState()
+    val isSending          by viewModel.isSending.collectAsState()
+    val isGeneratingImage  by viewModel.isGeneratingImage.collectAsState()
+    val isSpeaking         by viewModel.isSpeaking.collectAsState()
+    val snackbarHostState  = remember { SnackbarHostState() }
+    val listState          = rememberLazyListState()
+    var input              by rememberSaveable { mutableStateOf("") }
+    var modelMenuExpanded  by remember { mutableStateOf(false) }
+    var attachedImageUri   by remember { mutableStateOf<Uri?>(null) }
+    var attachedImagePath  by remember { mutableStateOf<String?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            attachedImageUri = uri
+            // Copy to cache so we can read it later without persistent URI permission
+            val ext  = context.contentResolver.getType(uri)?.substringAfterLast('/') ?: "jpg"
+            val dest = File(context.cacheDir, "chat_img_${System.currentTimeMillis()}.$ext")
+            context.contentResolver.openInputStream(uri)?.use { ins ->
+                FileOutputStream(dest).use { out -> ins.copyTo(out) }
+            }
+            attachedImagePath = dest.absolutePath
+        }
+    }
 
     LaunchedEffect(onOpenSessionRequest) {
         onOpenSessionRequest?.let { viewModel.openSession(it) }
@@ -321,15 +371,23 @@ fun ChatScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Box {
-                        Text(
-                            modelDisplayName(selectedModel),
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.clickable { modelMenuExpanded = true }
-                        )
+                        Column(modifier = Modifier.clickable { modelMenuExpanded = true }) {
+                            Text(
+                                modelDisplayName(selectedModel),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                "NVIDIA NIM",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         DropdownMenu(
                             expanded = modelMenuExpanded,
                             onDismissRequest = { modelMenuExpanded = false }
@@ -339,7 +397,19 @@ fun ChatScreen(
                             }
                             availableModels.take(200).forEach { model ->
                                 DropdownMenuItem(
-                                    text = { Text("${model.id}  ·  ${model.ownedBy}") },
+                                    text = {
+                                        Column {
+                                            Text(
+                                                model.id.substringAfterLast('/'),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Text(
+                                                model.ownedBy,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
                                     onClick = {
                                         viewModel.setModel(model.id)
                                         modelMenuExpanded = false
@@ -350,6 +420,12 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    if (isSpeaking) {
+                        IconButton(onClick = { viewModel.stopSpeaking() }) {
+                            Icon(Icons.Default.Stop, contentDescription = "Stop speaking",
+                                tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                     IconButton(onClick = { viewModel.startNewSession() }) {
                         Icon(Icons.Default.Add, contentDescription = "New chat")
                     }
@@ -362,34 +438,46 @@ fun ChatScreen(
                 )
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // Messages area
             if (messages.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Ask anything — powered by your NVIDIA key,\nfree with a ~40 req/min rate limit.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "NIM AI Agent",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Powered by NVIDIA NIM · All 100+ models available\nAttach images · Generate images · Full terminal access",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             } else {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(messages, key = { it.id }) { message ->
                         ChatBubble(
                             message = message,
-                            onCopy = { },
-                            onSpeak = { viewModel.speak(it) },
+                            onSpeak  = { viewModel.speak(it) },
                             onOpenCanvas = { language, code ->
                                 viewModel.openInCanvas(language, code)
                                 onOpenCanvas()
@@ -398,12 +486,16 @@ fun ChatScreen(
                     }
                     if (isGeneratingImage) {
                         item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(8.dp)
+                            ) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(8.dp))
                                 Text(
-                                    "Generating image…",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    "Generating image via Pollinations FLUX…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
                                 )
                             }
                         }
@@ -411,40 +503,131 @@ fun ChatScreen(
                 }
             }
 
+            // Attached image preview
+            if (attachedImageUri != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Image(
+                        painter = rememberAsyncImagePainter(attachedImageUri),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Text(
+                        "Image attached",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    IconButton(
+                        onClick = { attachedImageUri = null; attachedImagePath = null },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove image",
+                            modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            // Input bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Image attach
+                IconButton(onClick = { imagePickerLauncher.launch("image/*") }) {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        contentDescription = "Attach image",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // Generate image
                 IconButton(
                     onClick = { if (input.isNotBlank()) viewModel.generateImage(input.trim()) },
                     enabled = !isGeneratingImage
                 ) {
-                    Icon(Icons.Default.Image, contentDescription = "Generate image from prompt")
+                    Icon(
+                        Icons.Default.Image,
+                        contentDescription = "Generate image",
+                        tint = if (!isGeneratingImage) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Message…") },
+                    placeholder = {
+                        Text(
+                            "Message NIM Agent…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                     minLines = 1,
                     maxLines = 5,
-                    keyboardOptions = KeyboardOptions.Default
+                    keyboardOptions = KeyboardOptions.Default,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        cursorColor          = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(20.dp)
                 )
+
                 IconButton(
                     onClick = {
                         val text = input
+                        val img  = attachedImagePath
                         input = ""
-                        viewModel.sendMessage(text)
+                        attachedImageUri  = null
+                        attachedImagePath = null
+                        viewModel.sendMessage(text, img)
                     },
-                    enabled = input.isNotBlank() && !isSending
+                    enabled = (input.isNotBlank() || attachedImageUri != null) && !isSending
                 ) {
                     if (isSending) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     } else {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    if (input.isNotBlank() || attachedImageUri != null)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.surfaceVariant,
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
+                                modifier = Modifier.size(18.dp),
+                                tint = if (input.isNotBlank() || attachedImageUri != null)
+                                    MaterialTheme.colorScheme.onPrimary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -457,11 +640,10 @@ private fun modelDisplayName(modelId: String): String = modelId.substringAfterLa
 @Composable
 private fun ChatBubble(
     message: ChatUiMessage,
-    onCopy: (String) -> Unit,
     onSpeak: (String) -> Unit,
     onOpenCanvas: (String, String) -> Unit
 ) {
-    val isUser = message.role == ChatMessageEntity.ROLE_USER
+    val isUser    = message.role == ChatMessageEntity.ROLE_USER
     val clipboard = LocalClipboardManager.current
     var thinkingExpanded by rememberSaveable(message.id) { mutableStateOf(false) }
 
@@ -470,17 +652,46 @@ private fun ChatBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier.widthIn(max = 340.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
+            // AI avatar chip
+            if (!isUser) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "N",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    Text(
+                        "NIM Agent",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Thinking block (reasoning models)
             if (!isUser && message.reasoningContent.isNotBlank()) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .animateContentSize(),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    )
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(Modifier.padding(10.dp)) {
                         Row(
@@ -490,14 +701,14 @@ private fun ChatBubble(
                             Icon(
                                 Icons.Default.Psychology,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(Modifier.size(6.dp))
                             Text(
                                 "Thinking",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(
@@ -505,9 +716,11 @@ private fun ChatBubble(
                                 modifier = Modifier.size(20.dp)
                             ) {
                                 Icon(
-                                    if (thinkingExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    if (thinkingExpanded) Icons.Default.ExpandLess
+                                    else Icons.Default.ExpandMore,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                         }
@@ -525,66 +738,85 @@ private fun ChatBubble(
                 Spacer(Modifier.size(6.dp))
             }
 
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isUser) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surface
-                    }
-                ),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    if (message.content.isEmpty() && message.isStreaming) {
-                        TypingDots()
-                    } else {
-                        parseMessageParts(message.content).forEach { part ->
-                            when (part) {
-                                is MessagePart.Text -> if (part.text.isNotBlank()) {
-                                    Text(
-                                        part.text.trim(),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (isUser) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        }
+            // Attached image (user side)
+            if (isUser && message.imagePath != null) {
+                Image(
+                    painter = rememberAsyncImagePainter(File(message.imagePath)),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(180.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .padding(bottom = 4.dp),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            // Message bubble
+            if (message.content.isNotBlank() || message.isStreaming) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isUser)
+                            MaterialTheme.colorScheme.primaryContainer
+                        else
+                            MaterialTheme.colorScheme.surface
+                    ),
+                    shape = if (isUser)
+                        RoundedCornerShape(18.dp, 4.dp, 18.dp, 18.dp)
+                    else
+                        RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        if (message.content.isEmpty() && message.isStreaming) {
+                            TypingDots()
+                        } else {
+                            parseMessageParts(message.content).forEach { part ->
+                                when (part) {
+                                    is MessagePart.Text -> if (part.text.isNotBlank()) {
+                                        Text(
+                                            part.text.trim(),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isUser)
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    is MessagePart.Code -> CodeBlock(
+                                        language = part.language,
+                                        code = part.code,
+                                        onOpenCanvas = { onOpenCanvas(part.language, part.code) }
                                     )
                                 }
-                                is MessagePart.Code -> CodeBlock(
-                                    language = part.language,
-                                    code = part.code,
-                                    onOpenCanvas = { onOpenCanvas(part.language, part.code) }
-                                )
                             }
                         }
                     }
                 }
             }
 
+            // Action row
             if (!message.isStreaming && message.content.isNotBlank()) {
-                Row {
+                Row(modifier = Modifier.padding(top = 2.dp)) {
                     IconButton(
                         onClick = { clipboard.setText(AnnotatedString(message.content)) },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             Icons.Default.ContentCopy,
                             contentDescription = "Copy",
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     if (!isUser) {
                         IconButton(
                             onClick = { onSpeak(message.content) },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
                                 Icons.Default.VolumeUp,
                                 contentDescription = "Speak",
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -602,26 +834,31 @@ private fun CodeBlock(language: String, code: String, onOpenCanvas: () -> Unit) 
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFF0D1117)
+        ),
+        shape = RoundedCornerShape(10.dp)
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .background(Color(0xFF161B22))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     language.ifBlank { "code" },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onOpenCanvas, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Default.OpenInFull,
                         contentDescription = "Open in canvas",
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 IconButton(
@@ -631,7 +868,8 @@ private fun CodeBlock(language: String, code: String, onOpenCanvas: () -> Unit) 
                     Icon(
                         Icons.Default.ContentCopy,
                         contentDescription = "Copy code",
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -639,13 +877,13 @@ private fun CodeBlock(language: String, code: String, onOpenCanvas: () -> Unit) 
                 Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 Text(
                     code.trim(),
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = Color(0xFFE6EDF3)
                 )
             }
         }
@@ -654,9 +892,16 @@ private fun CodeBlock(language: String, code: String, onOpenCanvas: () -> Unit) 
 
 @Composable
 private fun TypingDots() {
+    var dot by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(400)
+            dot = (dot + 1) % 4
+        }
+    }
     Text(
-        "● ● ●",
+        "●".repeat(dot + 1).padEnd(3, '○'),
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+        color = MaterialTheme.colorScheme.primary
     )
 }

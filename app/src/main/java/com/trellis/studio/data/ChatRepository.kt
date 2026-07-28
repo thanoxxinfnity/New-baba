@@ -1,5 +1,6 @@
 package com.trellis.studio.data
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -15,8 +16,12 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 data class ChatModelInfo(val id: String, val ownedBy: String)
+
+/** A message in the history with an optional attached image path. */
+data class ChatHistoryEntry(val role: String, val content: String, val imagePath: String? = null)
 
 sealed interface ChatStreamEvent {
     data class ContentDelta(val text: String) : ChatStreamEvent
@@ -26,9 +31,10 @@ sealed interface ChatStreamEvent {
 }
 
 /**
- * Text chat over NVIDIA's OpenAI-compatible NIM API (integrate.api.nvidia.com) — the
- * same nvapi- key already used for TRELLIS powers 100+ chat/reasoning models here too,
- * with no separate signup. Free tier: rate-limited (~40 req/min), no token/credit cap.
+ * Text (and vision) chat over NVIDIA's OpenAI-compatible NIM API.
+ * When a message has an [ChatHistoryEntry.imagePath], the image is Base64-encoded
+ * and sent as a multimodal content block — compatible with vision models like
+ * meta/llama-3.2-90b-vision-instruct on NVIDIA NIM.
  */
 class ChatRepository(
     private val okHttpClient: OkHttpClient,
@@ -61,8 +67,8 @@ class ChatRepository(
         }
     }
 
-    /** Streams a chat completion; [messages] is ordered (role, content) pairs, oldest first. */
-    fun streamChat(model: String, messages: List<Pair<String, String>>): Flow<ChatStreamEvent> = callbackFlow {
+    /** Streams a chat completion. [history] entries may include an image path for vision. */
+    fun streamChat(model: String, history: List<ChatHistoryEntry>): Flow<ChatStreamEvent> = callbackFlow {
         val apiKey = apiKeyProvider()
         if (apiKey.isBlank()) {
             trySend(ChatStreamEvent.Error("NVIDIA API key is missing. Add it in Settings."))
@@ -70,10 +76,8 @@ class ChatRepository(
             return@callbackFlow
         }
 
-        val messagesJson = JSONArray()
-        messages.forEach { (role, content) ->
-            messagesJson.put(JSONObject().put("role", role).put("content", content))
-        }
+        val messagesJson = buildMessagesJson(history)
+
         val payload = JSONObject()
             .put("model", model)
             .put("messages", messagesJson)
@@ -97,9 +101,9 @@ class ChatRepository(
                 runCatching {
                     val delta = JSONObject(data)
                         .optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")
-                    val content = delta?.optString("content").orEmpty()
+                    val content  = delta?.optString("content").orEmpty()
                     val reasoning = delta?.optString("reasoning_content").orEmpty()
-                    if (content.isNotEmpty()) trySend(ChatStreamEvent.ContentDelta(content))
+                    if (content.isNotEmpty())   trySend(ChatStreamEvent.ContentDelta(content))
                     if (reasoning.isNotEmpty()) trySend(ChatStreamEvent.ReasoningDelta(reasoning))
                 }
             }
@@ -112,33 +116,60 @@ class ChatRepository(
                             JSONObject(body).optJSONObject("error")?.optString("message")
                         }.getOrNull()?.takeIf { it.isNotBlank() }
                         when (response.code) {
-                            401, 403 -> "The NVIDIA API key was rejected. Check the key in Settings."
-                            429 -> "Rate limit reached (about 40 requests/minute). Wait a moment and retry."
-                            else -> detail ?: "Chat request failed (HTTP ${response.code})."
+                            401, 403 -> "NVIDIA API key rejected. Check Settings."
+                            429      -> "Rate limit reached (~40 req/min). Wait a moment."
+                            else     -> detail ?: "Chat request failed (HTTP ${response.code})."
                         }
                     }
                     t != null -> t.toUserMessage()
-                    else -> "Chat request failed."
+                    else      -> "Chat request failed."
                 }
                 trySend(ChatStreamEvent.Error(message))
                 close()
             }
 
-            override fun onClosed(eventSource: EventSource) {
-                close()
-            }
+            override fun onClosed(eventSource: EventSource) { close() }
         }
 
         val eventSource = EventSources.createFactory(okHttpClient).newEventSource(request, listener)
         awaitClose { eventSource.cancel() }
     }
 
-    private fun requireApiKey(): String {
-        val apiKey = apiKeyProvider()
-        if (apiKey.isBlank()) {
-            throw AppException.Api("NVIDIA API key is missing. Add it in Settings.")
+    private fun buildMessagesJson(history: List<ChatHistoryEntry>): JSONArray {
+        val array = JSONArray()
+        history.forEach { entry ->
+            val msgObj = JSONObject().put("role", entry.role)
+            if (entry.imagePath != null && entry.role == "user") {
+                // Multimodal content block
+                val contentArr = JSONArray()
+                contentArr.put(JSONObject().put("type", "text").put("text", entry.content))
+                val imgFile = File(entry.imagePath)
+                if (imgFile.exists()) {
+                    val b64 = Base64.encodeToString(imgFile.readBytes(), Base64.NO_WRAP)
+                    val mimeType = when (imgFile.extension.lowercase()) {
+                        "png"  -> "image/png"
+                        "webp" -> "image/webp"
+                        else   -> "image/jpeg"
+                    }
+                    contentArr.put(
+                        JSONObject()
+                            .put("type", "image_url")
+                            .put("image_url", JSONObject().put("url", "data:$mimeType;base64,$b64"))
+                    )
+                }
+                msgObj.put("content", contentArr)
+            } else {
+                msgObj.put("content", entry.content)
+            }
+            array.put(msgObj)
         }
-        return apiKey
+        return array
+    }
+
+    private fun requireApiKey(): String {
+        val k = apiKeyProvider()
+        if (k.isBlank()) throw AppException.Api("NVIDIA API key is missing. Add it in Settings.")
+        return k
     }
 
     private companion object {

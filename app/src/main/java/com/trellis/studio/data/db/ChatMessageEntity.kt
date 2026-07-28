@@ -12,10 +12,12 @@ data class ChatMessageEntity(
     val content: String,
     /** Populated only for reasoning models — shown as a collapsible "Thinking" section. */
     val reasoningContent: String?,
-    val createdAt: Long
+    val createdAt: Long,
+    /** Local file path of an image attached to this message (user side only, nullable). */
+    val imagePath: String? = null
 ) {
     companion object {
-        const val ROLE_USER = "user"
+        const val ROLE_USER      = "user"
         const val ROLE_ASSISTANT = "assistant"
     }
 }
