@@ -9,12 +9,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
@@ -42,22 +45,28 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -319,13 +328,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        const val DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
+        const val DEFAULT_MODEL = "meta/llama-3.1-70b-instruct"
         const val STREAMING_ID  = -1L
     }
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
@@ -345,7 +355,7 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val listState         = rememberLazyListState()
     var input             by rememberSaveable { mutableStateOf("") }
-    var modelMenuExpanded by remember { mutableStateOf(false) }
+    var showModelPicker   by remember { mutableStateOf(false) }
     var attachedImageUri  by remember { mutableStateOf<Uri?>(null) }
     var attachedImagePath by remember { mutableStateOf<String?>(null) }
 
@@ -569,66 +579,32 @@ fun ChatScreen(
                                 )
                             }
 
-                            // Model selector chip
-                            Box {
-                                Card(
-                                    modifier = Modifier.clickable { modelMenuExpanded = true },
-                                    shape    = RoundedCornerShape(20.dp),
-                                    colors   = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                    ),
-                                    elevation = CardDefaults.cardElevation(0.dp)
+                            // Model selector chip → opens bottom sheet
+                            Card(
+                                modifier  = Modifier.clickable { showModelPicker = true },
+                                shape     = RoundedCornerShape(20.dp),
+                                colors    = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                                elevation = CardDefaults.cardElevation(0.dp)
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Text(
-                                            modelShortName(selectedModel),
-                                            style     = MaterialTheme.typography.labelMedium,
-                                            color     = MaterialTheme.colorScheme.onSurface,
-                                            maxLines  = 1
-                                        )
-                                        Icon(
-                                            Icons.Default.ExpandMore,
-                                            contentDescription = "Change model",
-                                            modifier = Modifier.size(14.dp),
-                                            tint     = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                                DropdownMenu(
-                                    expanded          = modelMenuExpanded,
-                                    onDismissRequest  = { modelMenuExpanded = false }
-                                ) {
-                                    if (availableModels.isEmpty()) {
-                                        DropdownMenuItem(
-                                            text    = { Text("Loading models…") },
-                                            onClick = {}
-                                        )
-                                    }
-                                    availableModels.take(200).forEach { model ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Column {
-                                                    Text(
-                                                        model.id.substringAfterLast('/'),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-                                                    Text(
-                                                        model.ownedBy,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            },
-                                            onClick = {
-                                                viewModel.setModel(model.id)
-                                                modelMenuExpanded = false
-                                            }
-                                        )
-                                    }
+                                    Text(
+                                        modelShortName(selectedModel),
+                                        style    = MaterialTheme.typography.labelMedium,
+                                        color    = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                    Icon(
+                                        Icons.Default.ExpandMore,
+                                        contentDescription = "Change model",
+                                        modifier = Modifier.size(14.dp),
+                                        tint     = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
 
@@ -682,6 +658,16 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    // ── Model picker bottom sheet ─────────────────────────────────────────────
+    if (showModelPicker) {
+        ModelPickerSheet(
+            models       = availableModels,
+            currentModel = selectedModel,
+            onSelect     = { viewModel.setModel(it) },
+            onDismiss    = { showModelPicker = false }
+        )
     }
 }
 
@@ -974,6 +960,158 @@ private fun TypingDots() {
         style = MaterialTheme.typography.bodyMedium,
         color = NimOrange
     )
+}
+
+// ── Model picker bottom sheet ─────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun ModelPickerSheet(
+    models: List<ChatModelInfo>,
+    currentModel: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var search by remember { mutableStateOf("") }
+
+    val chatCategories = remember { setOf("Reasoning", "Coding", "Deep Thinking", "Chat & RAG", "Vision & Industrial") }
+
+    val filtered by remember(search, models) {
+        derivedStateOf {
+            val q = search.trim().lowercase()
+            models.filter { m ->
+                m.ownedBy in chatCategories &&
+                (q.isEmpty() || m.id.lowercase().contains(q) || m.ownedBy.lowercase().contains(q))
+            }
+        }
+    }
+    val grouped by remember(filtered) {
+        derivedStateOf { filtered.groupBy { it.ownedBy } }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest  = onDismiss,
+        sheetState        = sheetState,
+        containerColor    = MaterialTheme.colorScheme.surface,
+        dragHandle        = null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 20.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null,
+                    tint = NimOrange, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Choose Model",
+                    style      = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color      = MaterialTheme.colorScheme.onSurface,
+                    modifier   = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.size(12.dp))
+            OutlinedTextField(
+                value         = search,
+                onValueChange = { search = it },
+                placeholder   = { Text("Search models…") },
+                leadingIcon   = {
+                    Icon(Icons.Default.Search, contentDescription = null,
+                        modifier = Modifier.size(18.dp))
+                },
+                modifier    = Modifier.fillMaxWidth(),
+                shape       = RoundedCornerShape(14.dp),
+                singleLine  = true,
+                colors      = TextFieldDefaults.colors(
+                    focusedIndicatorColor   = NimOrange,
+                    focusedContainerColor   = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            )
+            Spacer(Modifier.size(4.dp))
+        }
+
+        LazyColumn(
+            modifier       = Modifier.fillMaxHeight(0.65f),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+        ) {
+            grouped.entries.forEachIndexed { catIndex, (category, catModels) ->
+                stickyHeader(key = "header_$category") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(top = if (catIndex == 0) 0.dp else 8.dp, bottom = 4.dp)
+                    ) {
+                        Text(
+                            text  = category.uppercase(),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = NimOrange,
+                            modifier = Modifier.padding(start = 2.dp)
+                        )
+                        HorizontalDivider(
+                            modifier  = Modifier.padding(top = 4.dp),
+                            color     = NimOrange.copy(alpha = 0.25f),
+                            thickness = 0.8.dp
+                        )
+                    }
+                }
+                items(catModels, key = { it.id }) { model ->
+                    val isSelected = model.id == currentModel
+                    Card(
+                        modifier  = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clickable { onSelect(model.id); onDismiss() },
+                        colors    = CardDefaults.cardColors(
+                            containerColor = if (isSelected)
+                                NimOrange.copy(alpha = 0.12f)
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        ),
+                        shape     = RoundedCornerShape(10.dp),
+                        elevation = CardDefaults.cardElevation(0.dp)
+                    ) {
+                        Row(
+                            modifier          = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text       = model.id.substringAfterLast('/'),
+                                    style      = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color      = if (isSelected) NimOrange
+                                                 else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text  = model.id,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(Icons.Default.Check, contentDescription = null,
+                                    tint     = NimOrange,
+                                    modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
