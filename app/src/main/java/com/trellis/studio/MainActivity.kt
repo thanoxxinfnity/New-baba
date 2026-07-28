@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Icon
@@ -32,6 +33,7 @@ import androidx.navigation.navArgument
 import com.trellis.studio.ui.screens.CanvasScreen
 import com.trellis.studio.ui.screens.ChatHistoryScreen
 import com.trellis.studio.ui.screens.ChatScreen
+import com.trellis.studio.ui.screens.GameBuilderScreen
 import com.trellis.studio.ui.screens.HistoryScreen
 import com.trellis.studio.ui.screens.ImageTo3dScreen
 import com.trellis.studio.ui.screens.SettingsScreen
@@ -46,8 +48,8 @@ private val tabs = listOf(
     Tab("chat",         "Chat",     Icons.AutoMirrored.Filled.Chat),
     Tab("text_to_image","Image",    Icons.Default.Image),
     Tab("image_to_3d", "3D",       Icons.Default.ViewInAr),
+    Tab("game_builder","Games",    Icons.Default.SportsEsports),
     Tab("terminal",    "Terminal", Icons.Default.Terminal),
-    Tab("history",     "History",  Icons.Default.History),
     Tab("settings",    "Settings", Icons.Default.Settings)
 )
 
@@ -101,9 +103,10 @@ private fun MainScreen() {
         ) {
             composable("chat") {
                 ChatScreen(
-                    onOpenHistory       = { navController.navigate("chat_history") },
+                    onOpenHistory        = { navController.navigate("chat_history") },
                     onOpenSessionRequest = null,
-                    onOpenCanvas        = { navController.navigate("canvas") }
+                    onOpenCanvas         = { navController.navigate("canvas") },
+                    onNavigateToTerminal = { navigateToTab("terminal") }
                 )
             }
             composable("chat_history") {
@@ -121,10 +124,14 @@ private fun MainScreen() {
             ) { entry ->
                 val id = entry.arguments?.getLong("id") ?: return@composable
                 ChatScreen(
-                    onOpenHistory       = { navController.navigate("chat_history") },
+                    onOpenHistory        = { navController.navigate("chat_history") },
                     onOpenSessionRequest = id,
-                    onOpenCanvas        = { navController.navigate("canvas") }
+                    onOpenCanvas         = { navController.navigate("canvas") },
+                    onNavigateToTerminal = { navigateToTab("terminal") }
                 )
+            }
+            composable("game_builder") {
+                GameBuilderScreen()
             }
             composable("canvas") {
                 CanvasScreen(onBack = { navController.popBackStack() })

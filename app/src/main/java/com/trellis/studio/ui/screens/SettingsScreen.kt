@@ -25,8 +25,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.MicExternalOn
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -61,8 +62,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.App
+import kotlinx.coroutines.launch
 import com.trellis.studio.data.Model3DProvider
 import java.io.File
 import java.io.FileOutputStream
@@ -89,6 +92,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setNvidiaVoiceEnabled(v: Boolean) = settings.setNvidiaVoiceEnabled(v)
     fun setVoiceCloneFilePath(path: String?) = settings.setVoiceCloneFilePath(path)
     fun saveVoiceModel(model: String)    = settings.setVoiceModel(model)
+
+    private val _apiTestResult = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val apiTestResult: kotlinx.coroutines.flow.StateFlow<String?> = _apiTestResult
+
+    fun testApiKey() {
+        viewModelScope.launch {
+            _apiTestResult.value = "Testing…"
+            val result = container.chatRepository.testApiKey()
+            _apiTestResult.value = result ?: "✔ API key is valid — connection OK"
+        }
+    }
 }
 
 @Composable
@@ -105,6 +119,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     var showNvidiaKey   by rememberSaveable { mutableStateOf(false) }
     var showFalKey      by rememberSaveable { mutableStateOf(false) }
     var showPollinKey   by rememberSaveable { mutableStateOf(false) }
+    val apiTestResult   by viewModel.apiTestResult.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var savedTick by remember { mutableStateOf(0) }
@@ -159,9 +174,37 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                     onToggle    = { showNvidiaKey = !showNvidiaKey }
                 )
                 Spacer(Modifier.height(8.dp))
-                SaveButton {
-                    viewModel.saveNvidiaKey(nvidiaKey)
-                    savedTick++
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SaveButton(modifier = Modifier.weight(1f)) {
+                        viewModel.saveNvidiaKey(nvidiaKey)
+                        savedTick++
+                    }
+                    Button(
+                        onClick = { viewModel.saveNvidiaKey(nvidiaKey); viewModel.testApiKey() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Default.WifiTethering, contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Spacer(Modifier.size(6.dp))
+                        Text("Test", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                }
+                if (apiTestResult != null) {
+                    Spacer(Modifier.height(6.dp))
+                    val isOk = apiTestResult?.startsWith("✔") == true
+                    Text(
+                        apiTestResult ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isOk) MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.error
+                    )
                 }
             }
 
@@ -237,7 +280,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            Icons.Default.MicExternalOn,
+                            Icons.Default.Mic,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
@@ -259,7 +302,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.MicExternalOn, contentDescription = null,
+                        Icon(Icons.Default.Mic, contentDescription = null,
                             modifier = Modifier.size(16.dp))
                         Spacer(Modifier.size(6.dp))
                         Text("Upload Sample")
@@ -450,13 +493,11 @@ private fun SecretField(
 }
 
 @Composable
-private fun SaveButton(onClick: () -> Unit) {
+private fun SaveButton(modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
     Button(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp),
-        shape = RoundedCornerShape(12.dp)
+        onClick  = onClick,
+        modifier = modifier.height(48.dp),
+        shape    = RoundedCornerShape(12.dp)
     ) {
         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.size(8.dp))

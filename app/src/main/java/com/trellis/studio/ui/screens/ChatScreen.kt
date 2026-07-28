@@ -41,7 +41,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -113,6 +113,7 @@ data class ChatUiMessage(
     val imagePath: String? = null
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as App).container
@@ -329,6 +330,7 @@ fun ChatScreen(
     onOpenHistory: () -> Unit,
     onOpenSessionRequest: Long?,
     onOpenCanvas: () -> Unit,
+    onNavigateToTerminal: () -> Unit = {},
     viewModel: ChatViewModel = viewModel()
 ) {
     val context            = LocalContext.current
@@ -461,7 +463,9 @@ fun ChatScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Powered by NVIDIA NIM · All 100+ models available\nAttach images · Generate images · Full terminal access",
+                            "Powered by NVIDIA NIM · 100+ LLM models\n" +
+                            "Attach images · Generate images · Build games\n" +
+                            "Type \"start\" to open the Linux terminal",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -591,12 +595,18 @@ fun ChatScreen(
 
                 IconButton(
                     onClick = {
-                        val text = input
+                        val text = input.trim()
                         val img  = attachedImagePath
                         input = ""
                         attachedImageUri  = null
                         attachedImagePath = null
-                        viewModel.sendMessage(text, img)
+                        // Smart commands: "start" or "terminal" → open terminal
+                        if (img == null && (text.equals("start", ignoreCase = true) ||
+                                            text.equals("terminal", ignoreCase = true))) {
+                            onNavigateToTerminal()
+                        } else {
+                            viewModel.sendMessage(text, img)
+                        }
                     },
                     enabled = (input.isNotBlank() || attachedImageUri != null) && !isSending
                 ) {
@@ -814,7 +824,7 @@ private fun ChatBubble(
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
-                                Icons.Default.VolumeUp,
+                                Icons.AutoMirrored.Filled.VolumeUp,
                                 contentDescription = "Speak",
                                 modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
