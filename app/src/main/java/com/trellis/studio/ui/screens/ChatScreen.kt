@@ -64,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -94,12 +95,14 @@ import coil.compose.rememberAsyncImagePainter
 import com.trellis.studio.App
 import com.trellis.studio.data.ChatHistoryEntry
 import com.trellis.studio.data.ChatModelInfo
+import com.trellis.studio.data.ChatRepository
 import com.trellis.studio.data.ChatStreamEvent
 import com.trellis.studio.data.db.ChatMessageEntity
 import com.trellis.studio.data.toUserMessage
 import com.trellis.studio.ui.components.MessagePart
 import com.trellis.studio.ui.components.parseMessageParts
 import com.trellis.studio.ui.theme.NimOrange
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -162,6 +165,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _errorMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val errorMessage: SharedFlow<String> = _errorMessage
 
+    private var streamingJob: Job? = null
+
+    fun cancelCurrentStream() {
+        streamingJob?.cancel()
+        streamingJob = null
+        _streamingMessage.value = null
+        _isSending.value = false
+    }
+
     init { loadModels() }
 
     fun loadModels(forceRefresh: Boolean = false) {
@@ -173,6 +185,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startNewSession() {
+        cancelCurrentStream()
         _sessionId.value = null
         _streamingMessage.value = null
     }
@@ -207,7 +220,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isEmpty() && imagePath == null) return
         if (_isSending.value) return
 
-        viewModelScope.launch {
+        streamingJob = viewModelScope.launch {
             val historyBeforeThis = persistedMessages.value.map {
                 ChatHistoryEntry(it.role, it.content, it.imagePath)
             }
@@ -371,6 +384,10 @@ fun ChatScreen(
             }
             attachedImagePath = dest.absolutePath
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.cancelCurrentStream() }
     }
 
     LaunchedEffect(onOpenSessionRequest) {
@@ -1067,6 +1084,7 @@ private fun ModelPickerSheet(
                 }
                 items(catModels, key = { it.id }) { model ->
                     val isSelected = model.id == currentModel
+                    val isFast = model.id in ChatRepository.FAST_MODELS
                     Card(
                         modifier  = Modifier
                             .fillMaxWidth()
@@ -1086,14 +1104,26 @@ private fun ModelPickerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(
-                                    text       = model.id.substringAfterLast('/'),
-                                    style      = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                                    ),
-                                    color      = if (isSelected) NimOrange
-                                                 else MaterialTheme.colorScheme.onSurface
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text       = model.id.substringAfterLast('/'),
+                                        style      = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                        ),
+                                        color      = if (isSelected) NimOrange
+                                                     else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (isFast) {
+                                        Text(
+                                            "⚡ Fast",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = Color(0xFF4CAF50)
+                                        )
+                                    }
+                                }
                                 Text(
                                     text  = model.id,
                                     style = MaterialTheme.typography.labelSmall,

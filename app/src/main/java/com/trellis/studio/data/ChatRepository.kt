@@ -104,8 +104,12 @@ class ChatRepository(
                             }.getOrNull()?.takeIf { it.isNotBlank() }
                             when (resp.code) {
                                 401, 403 -> "API key rejected (401/403). Check your nvapi- key in Settings."
+                                404      -> "Model not found (404). Select a different model in the picker."
+                                422      -> detail ?: "Invalid request (422). Try a different model or shorter input."
                                 429      -> "Rate limit hit (~40 req/min). Wait a moment and retry."
-                                else     -> detail ?: "Request failed (HTTP ${resp.code})."
+                                else     -> detail
+                                    ?: if (body.isNotBlank()) "API error (${resp.code}): ${body.take(200)}"
+                                    else "Request failed (HTTP ${resp.code})."
                             }
                         }
                         t != null -> t.toUserMessage()
@@ -169,6 +173,19 @@ class ChatRepository(
 
     companion object {
         const val BASE_URL = "https://integrate.api.nvidia.com"
+
+        /** Models with consistently low first-token latency. */
+        val FAST_MODELS = setOf(
+            "deepseek-ai/deepseek-v4-flash",
+            "kimi/kimi-k2.6",
+            "minimax/minimax-m2.7",
+            "community/gpt-oss-20b",
+            "meta/llama-3.1-70b-instruct",
+            "google/gemma-2-27b-it",
+            "mistralai/codestral-22b",
+            "mistralai/mistral-large-2",
+            "qwen/qwen3-coder-30b"
+        )
 
         const val GAME_SYSTEM_PROMPT = """You are an expert game developer. When asked to create a game, generate a complete, self-contained HTML5 game in a SINGLE HTML file.
 

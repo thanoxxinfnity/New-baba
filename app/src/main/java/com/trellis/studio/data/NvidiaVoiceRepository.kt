@@ -28,24 +28,28 @@ class NvidiaVoiceRepository(
 ) {
     private var mediaPlayer: MediaPlayer? = null
 
-    /** Returns true if synthesis + playback started successfully. */
-    suspend fun synthesizeAndPlay(text: String): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * Synthesizes [text] using [model] (defaults to settings value) and optional
+     * [referenceAudioPath] for zero-shot voice cloning. Returns raw MP3 bytes,
+     * or null on failure.
+     */
+    suspend fun synthesize(
+        text: String,
+        model: String = voiceModelProvider().ifBlank { DEFAULT_TTS_MODEL },
+        referenceAudioPath: String? = voiceFileProvider()
+    ): ByteArray? = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider()
-        if (apiKey.isBlank()) return@withContext false
-
-        val model = voiceModelProvider().ifBlank { "elevenlabs/eleven-multilingual-v2" }
-        val voicePath = voiceFileProvider()
+        if (apiKey.isBlank()) return@withContext null
 
         val payloadObj = JSONObject().apply {
             put("model", model)
             put("input", text)
-            put("voice", "alloy")           // default voice ID; overridden by reference_audio
+            put("voice", "alloy")
             put("response_format", "mp3")
-            if (voicePath != null) {
-                val file = File(voicePath)
+            if (referenceAudioPath != null) {
+                val file = File(referenceAudioPath)
                 if (file.exists()) {
-                    val bytes = file.readBytes()
-                    put("reference_audio", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                    put("reference_audio", Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
                 }
             }
         }
@@ -57,17 +61,21 @@ class NvidiaVoiceRepository(
                 .header("Accept", "audio/mpeg")
                 .post(payloadObj.toString().toRequestBody("application/json".toMediaType()))
                 .build()
-
             okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext false
-                val audioBytes = response.body?.bytes() ?: return@withContext false
-                playBytes(audioBytes)
-                true
+                if (!response.isSuccessful) null else response.body?.bytes()
             }
-        }.getOrDefault(false)
+        }.getOrNull()
     }
 
-    private fun playBytes(bytes: ByteArray) {
+    /** Returns true if synthesis + playback started successfully. */
+    suspend fun synthesizeAndPlay(text: String): Boolean {
+        val bytes = synthesize(text) ?: return false
+        playAudioBytes(bytes)
+        return true
+    }
+
+    /** Writes [bytes] to cache and starts playback. Returns the cache file path. */
+    fun playAudioBytes(bytes: ByteArray): String {
         val tmp = File(context.cacheDir, "nim_tts_${System.currentTimeMillis()}.mp3")
         FileOutputStream(tmp).use { it.write(bytes) }
         stopAndRelease()
@@ -75,14 +83,26 @@ class NvidiaVoiceRepository(
             setDataSource(tmp.absolutePath)
             prepare()
             start()
-            setOnCompletionListener {
-                it.release()
-                tmp.delete()
-            }
+            setOnCompletionListener { it.release() }
         }
+        return tmp.absolutePath
     }
 
     fun stop() = stopAndRelease()
+
+    companion object {
+        const val DEFAULT_TTS_MODEL = "elevenlabs/eleven-multilingual-v2"
+
+        val TTS_MODELS = listOf(
+            "nvidia/magpie-tts-zeroshot",
+            "nvidia/magpie-tts-flow",
+            "nvidia/nemotron-voicechat",
+            "nvidia/personaplex",
+            "nvidia/magpie-tts-multilingual",
+            "resemble.ai/chatterbox-multilingual-tts",
+            "elevenlabs/eleven-multilingual-v2"
+        )
+    }
 
     private fun stopAndRelease() {
         runCatching { mediaPlayer?.stop() }
