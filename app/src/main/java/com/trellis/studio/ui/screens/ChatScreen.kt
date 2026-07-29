@@ -341,7 +341,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        const val DEFAULT_MODEL = "meta/llama-3.1-70b-instruct"
+        const val DEFAULT_MODEL = "deepseek-ai/deepseek-r1"
         const val STREAMING_ID  = -1L
     }
 }
@@ -881,22 +881,37 @@ private fun ChatBubble(
 
             // Action row
             if (!message.isStreaming && message.content.isNotBlank()) {
+                var copied by remember { mutableStateOf(false) }
                 Row(modifier = Modifier.padding(top = 2.dp, start = if (isUser) 0.dp else 4.dp)) {
+                    // One-click copy with visual feedback
                     IconButton(
-                        onClick  = { clipboard.setText(AnnotatedString(message.content)) },
-                        modifier = Modifier.size(28.dp)
+                        onClick  = {
+                            clipboard.setText(AnnotatedString(message.content))
+                            copied = true
+                        },
+                        modifier = Modifier.size(30.dp)
                     ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            modifier = Modifier.size(15.dp),
+                            tint     = if (copied) Color(0xFF4CAF50)
+                                       else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    LaunchedEffect(copied) {
+                        if (copied) {
+                            kotlinx.coroutines.delay(1500)
+                            copied = false
+                        }
                     }
                     if (!isUser) {
                         IconButton(
                             onClick  = { onSpeak(message.content) },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(30.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Speak",
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(15.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

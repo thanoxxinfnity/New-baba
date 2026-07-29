@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
@@ -46,6 +47,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.trellis.studio.ui.screens.AiBrowserScreen
 import com.trellis.studio.ui.screens.CanvasScreen
 import com.trellis.studio.ui.screens.ChatHistoryScreen
 import com.trellis.studio.ui.screens.ChatScreen
@@ -147,6 +149,7 @@ private fun MainScreen() {
                 DrawerNav(Icons.Default.ViewInAr,     "3D Models",       currentRoute == "image_to_3d")   { go("image_to_3d")   }
                 DrawerNav(Icons.Default.SportsEsports,"Game Builder",    currentRoute == "game_builder")  { go("game_builder")  }
                 DrawerNav(Icons.Default.Mic,          "Voice Studio",    currentRoute == "tts_studio")    { go("tts_studio")    }
+                DrawerNav(Icons.Default.Language,     "AI Browser",      currentRoute == "ai_browser")    { go("ai_browser")    }
                 DrawerNav(Icons.Default.Terminal,     "Linux Terminal",  currentRoute == "terminal")      { go("terminal")      }
 
                 Spacer(Modifier.weight(1f))
@@ -214,6 +217,10 @@ private fun MainScreen() {
 
             composable("tts_studio") {
                 TtsStudioScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable("ai_browser") {
+                AiBrowserScreen(onBack = { navController.popBackStack() })
             }
 
             composable("terminal") {

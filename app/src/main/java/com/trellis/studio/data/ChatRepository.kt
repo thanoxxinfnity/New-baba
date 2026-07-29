@@ -176,15 +176,16 @@ class ChatRepository(
 
         /** Models with consistently low first-token latency. */
         val FAST_MODELS = setOf(
-            "deepseek-ai/deepseek-v4-flash",
-            "kimi/kimi-k2.6",
-            "minimax/minimax-m2.7",
-            "community/gpt-oss-20b",
+            "meta/llama-3.2-3b-instruct",
+            "meta/llama-3.2-1b-instruct",
             "meta/llama-3.1-70b-instruct",
-            "google/gemma-2-27b-it",
-            "mistralai/codestral-22b",
-            "mistralai/mistral-large-2",
-            "qwen/qwen3-coder-30b"
+            "mistralai/mistral-7b-instruct-v0.3",
+            "nv-mistralai/mistral-nemo-12b-instruct",
+            "google/gemma-2-9b-it",
+            "google/gemma-2-2b-it",
+            "microsoft/phi-3.5-mini-instruct",
+            "qwen/qwen2.5-coder-7b-instruct",
+            "ibm-granite/granite-3.0-8b-instruct"
         )
 
         const val GAME_SYSTEM_PROMPT = """You are an expert game developer. When asked to create a game, generate a complete, self-contained HTML5 game in a SINGLE HTML file.
@@ -199,53 +200,49 @@ Rules:
 - Return ONLY valid HTML starting with <!DOCTYPE html>"""
 
         val FALLBACK_MODELS = listOf(
-            // ── Reasoning ──────────────────────────────────────────────────────
-            ChatModelInfo("z.ai/glm-5.2",                            "Reasoning"),
-            ChatModelInfo("nvidia/nemotron-3-ultra-550b-a55b",       "Reasoning"),
-            ChatModelInfo("deepseek-ai/deepseek-v4-pro",             "Reasoning"),
-            ChatModelInfo("deepseek-ai/deepseek-v4-flash",           "Reasoning"),
-            ChatModelInfo("kimi/kimi-k3",                             "Reasoning"),
-            ChatModelInfo("kimi/kimi-k2.7-code",                     "Reasoning"),
-            ChatModelInfo("kimi/kimi-k2.6",                          "Reasoning"),
-            ChatModelInfo("poolside/laguna-xs-2.1",                  "Reasoning"),
-            ChatModelInfo("thinkingmachines/inkling",                "Reasoning"),
-            ChatModelInfo("minimax/minimax-m3",                      "Reasoning"),
-            ChatModelInfo("minimax/minimax-m2.7",                    "Reasoning"),
+            // ── Reasoning ─────────────────────────────────────────────────────
+            ChatModelInfo("deepseek-ai/deepseek-r1",                        "Reasoning"),
+            ChatModelInfo("deepseek-ai/deepseek-r1-distill-llama-70b",      "Reasoning"),
+            ChatModelInfo("deepseek-ai/deepseek-r1-distill-qwen-32b",       "Reasoning"),
+            ChatModelInfo("nvidia/llama-3.1-nemotron-ultra-253b-v1",        "Reasoning"),
+            ChatModelInfo("nvidia/llama-3.1-nemotron-70b-instruct",         "Reasoning"),
             // ── Coding ────────────────────────────────────────────────────────
-            ChatModelInfo("mistralai/codestral-22b",                 "Coding"),
-            ChatModelInfo("mistralai/mistral-medium-3.5-128b",       "Coding"),
-            ChatModelInfo("meta/codellama-70b-instruct",             "Coding"),
-            ChatModelInfo("qwen/qwen3-coder-next",                   "Coding"),
-            ChatModelInfo("qwen/qwen3-coder-30b",                    "Coding"),
-            // ── Deep Thinking ─────────────────────────────────────────────────
-            ChatModelInfo("meta/llama-3.1-405b-instruct",           "Deep Thinking"),
-            ChatModelInfo("meta/llama-3.1-70b-instruct",            "Deep Thinking"),
-            ChatModelInfo("qwen/qwen-2.5-72b-instruct",             "Deep Thinking"),
-            ChatModelInfo("qwen/qwen3.6-plus",                       "Deep Thinking"),
-            ChatModelInfo("microsoft/phi-3.5-moe-instruct",         "Deep Thinking"),
-            ChatModelInfo("google/gemma-4-31b-it",                   "Deep Thinking"),
+            ChatModelInfo("deepseek-ai/deepseek-v3",                        "Coding"),
+            ChatModelInfo("qwen/qwen2.5-coder-32b-instruct",                "Coding"),
+            ChatModelInfo("qwen/qwen2.5-coder-7b-instruct",                 "Coding"),
+            ChatModelInfo("mistralai/codestral-22b-instruct-v0.1",          "Coding"),
+            ChatModelInfo("meta/codellama-70b-instruct",                    "Coding"),
+            // ── Large / Deep Thinking ─────────────────────────────────────────
+            ChatModelInfo("meta/llama-3.1-405b-instruct",                   "Large Models"),
+            ChatModelInfo("meta/llama-3.3-70b-instruct",                    "Large Models"),
+            ChatModelInfo("meta/llama-3.1-70b-instruct",                    "Large Models"),
+            ChatModelInfo("mistralai/mixtral-8x22b-instruct-v0.1",          "Large Models"),
+            ChatModelInfo("mistralai/mistral-large-2-instruct",             "Large Models"),
+            ChatModelInfo("qwen/qwen2.5-72b-instruct",                      "Large Models"),
+            ChatModelInfo("01-ai/yi-large",                                 "Large Models"),
+            // ── Fast & Efficient ──────────────────────────────────────────────
+            ChatModelInfo("meta/llama-3.2-3b-instruct",                     "Fast & Efficient"),
+            ChatModelInfo("meta/llama-3.2-1b-instruct",                     "Fast & Efficient"),
+            ChatModelInfo("google/gemma-2-9b-it",                           "Fast & Efficient"),
+            ChatModelInfo("google/gemma-2-2b-it",                           "Fast & Efficient"),
+            ChatModelInfo("mistralai/mistral-7b-instruct-v0.3",             "Fast & Efficient"),
+            ChatModelInfo("nv-mistralai/mistral-nemo-12b-instruct",         "Fast & Efficient"),
+            ChatModelInfo("microsoft/phi-3.5-mini-instruct",                "Fast & Efficient"),
+            ChatModelInfo("ibm-granite/granite-3.0-8b-instruct",            "Fast & Efficient"),
+            ChatModelInfo("upstage/solar-10.7b-instruct",                   "Fast & Efficient"),
+            // ── General Chat ──────────────────────────────────────────────────
+            ChatModelInfo("google/gemma-2-27b-it",                          "General Chat"),
+            ChatModelInfo("microsoft/phi-3.5-moe-instruct",                 "General Chat"),
+            ChatModelInfo("microsoft/phi-3-medium-4k-instruct",             "General Chat"),
+            // ── Vision (multimodal) ───────────────────────────────────────────
+            ChatModelInfo("meta/llama-3.2-90b-vision-instruct",             "Vision"),
+            ChatModelInfo("meta/llama-3.2-11b-vision-instruct",             "Vision"),
+            ChatModelInfo("microsoft/phi-3.5-vision-instruct",              "Vision"),
             // ── Voice & Audio (TTS / STT — not for chat) ──────────────────────
-            ChatModelInfo("nvidia/magpie-tts-zeroshot",              "Voice & Audio"),
-            ChatModelInfo("nvidia/magpie-tts-flow",                  "Voice & Audio"),
-            ChatModelInfo("nvidia/nemotron-voicechat",               "Voice & Audio"),
-            ChatModelInfo("nvidia/personaplex",                      "Voice & Audio"),
-            ChatModelInfo("nvidia/magpie-tts-multilingual",          "Voice & Audio"),
-            ChatModelInfo("resemble.ai/chatterbox-multilingual-tts", "Voice & Audio"),
-            ChatModelInfo("nvidia/nemotron-speech-streaming-en-0.6b","Voice & Audio"),
-            ChatModelInfo("nvidia/parakeet-ctc-0.6b-en",            "Voice & Audio"),
-            ChatModelInfo("nvidia/parakeet-tdt",                     "Voice & Audio"),
-            ChatModelInfo("nvidia/canary",                           "Voice & Audio"),
-            // ── Chat & RAG ────────────────────────────────────────────────────
-            ChatModelInfo("mistralai/mistral-large-2",               "Chat & RAG"),
-            ChatModelInfo("google/gemma-2-27b-it",                   "Chat & RAG"),
-            ChatModelInfo("community/gpt-oss-120B",                  "Chat & RAG"),
-            ChatModelInfo("community/gpt-oss-20b",                   "Chat & RAG"),
-            ChatModelInfo("sarvam/sarvam-m",                         "Chat & RAG"),
-            ChatModelInfo("nvidia/nemotron-3-embed-1b",              "Chat & RAG"),
-            ChatModelInfo("nvidia/nemotron-3.5-content-safety",      "Chat & RAG"),
-            // ── Vision & Industrial ───────────────────────────────────────────
-            ChatModelInfo("nvidia/ising-calibration-1.5-31b",       "Vision & Industrial"),
-            ChatModelInfo("nvidia/qwen-image-edit-nvpcb-ovsl2sl",    "Vision & Industrial")
+            ChatModelInfo("elevenlabs/eleven-multilingual-v2",              "Voice & Audio"),
+            ChatModelInfo("elevenlabs/eleven-turbo-v2",                     "Voice & Audio"),
+            ChatModelInfo("nvidia/canary-1b",                               "Voice & Audio"),
+            ChatModelInfo("nvidia/parakeet-ctc-0.6b-en",                   "Voice & Audio")
         )
     }
 }
