@@ -1,0 +1,34 @@
+package com.trellis.studio.viewmodel
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.trellis.studio.data.prefs.AppPrefs
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+
+class SettingsViewModel(app: Application) : AndroidViewModel(app) {
+    private val prefs = AppPrefs(app)
+
+    val nvidiaKey   = prefs.nvidiaKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val falKey      = prefs.falKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val pollKey     = prefs.pollKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val selectedLlm = prefs.selectedLlm.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_LLM)
+    val selectedImg = prefs.selectedImg.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_IMG)
+    val selected3d  = prefs.selected3d.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_3D)
+    val selectedTts = prefs.selectedTts.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_TTS)
+    val systemPrompt= prefs.systemPrompt.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_SYSTEM)
+    val maxTokens   = prefs.maxTokens.stateIn(viewModelScope, SharingStarted.Eagerly, 2048)
+    val temperature = prefs.temperature.stateIn(viewModelScope, SharingStarted.Eagerly, 0.7f)
+
+    fun setNvidiaKey(v: String)    = viewModelScope.launch { prefs.setNvidiaKey(v.trim()) }
+    fun setFalKey(v: String)       = viewModelScope.launch { prefs.setFalKey(v.trim()) }
+    fun setPollKey(v: String)      = viewModelScope.launch { prefs.setPollKey(v.trim()) }
+    fun setSelectedLlm(v: String)  = viewModelScope.launch { prefs.setSelectedLlm(v) }
+    fun setSelectedImg(v: String)  = viewModelScope.launch { prefs.setSelectedImg(v) }
+    fun setSelected3d(v: String)   = viewModelScope.launch { prefs.setSelected3d(v) }
+    fun setSelectedTts(v: String)  = viewModelScope.launch { prefs.setSelectedTts(v) }
+    fun setSystemPrompt(v: String) = viewModelScope.launch { prefs.setSystemPrompt(v) }
+    fun setMaxTokens(v: Int)       = viewModelScope.launch { prefs.setMaxTokens(v) }
+    fun setTemperature(v: Float)   = viewModelScope.launch { prefs.setTemperature(v) }
+}
