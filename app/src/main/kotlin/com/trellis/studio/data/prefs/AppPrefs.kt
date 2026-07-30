@@ -26,8 +26,8 @@ class AppPrefs(private val context: Context) {
         val KEY_MAX_TOKENS       = intPreferencesKey("max_tokens")
         val KEY_TEMPERATURE      = floatPreferencesKey("temperature")
 
-        val DEFAULT_LLM     = "nvidia/llama-3.1-nemotron-70b-instruct"
-        val DEFAULT_IMG     = "black-forest-labs/flux-dev"
+        val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
+        val DEFAULT_IMG     = "pollinations/flux"
         val DEFAULT_3D      = "nvidia"
         val DEFAULT_TTS     = "nvidia/magpie-tts-flow"
         val DEFAULT_SYSTEM  = "You are a helpful AI assistant."

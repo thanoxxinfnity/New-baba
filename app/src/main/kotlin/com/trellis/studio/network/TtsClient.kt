@@ -1,81 +1,75 @@
 package com.trellis.studio.network
 
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
-import java.io.FileOutputStream
+import android.os.Build
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.Locale
+import kotlin.coroutines.resume
 
-/** Handles NVIDIA NIM Text-to-Speech generation */
-class TtsClient(private val context: Context) {
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
+/** Text-to-Speech using Android's built-in engine (works offline, no API key needed). */
+class TtsClient(context: Context) {
 
-    private val TTS_URL = "https://integrate.api.nvidia.com/v1/audio/speech"
-    private val JSON_MEDIA = "application/json".toMediaType()
-    private val json = Json { ignoreUnknownKeys = true }
+    private var tts: TextToSpeech? = null
+    private var ready = false
 
-    /**
-     * Synthesize speech from text using NVIDIA NIM TTS.
-     * Returns path to saved audio file.
-     */
+    val availableVoices: List<String> get() = tts?.voices
+        ?.filter { !it.isNetworkConnectionRequired }
+        ?.map { it.name }
+        ?.sorted()
+        ?: listOf("Default")
+
+    init {
+        tts = TextToSpeech(context) { status ->
+            ready = status == TextToSpeech.SUCCESS
+            if (ready) tts?.language = Locale.getDefault()
+        }
+    }
+
+    /** Speak text aloud. Returns success when speech finishes, or failure with reason. */
     suspend fun synthesize(
-        apiKey: String,
-        model: String,
+        @Suppress("UNUSED_PARAMETER") apiKey: String,
+        @Suppress("UNUSED_PARAMETER") model: String,
         text: String,
-        voice: String = "nova",
-    ): Result<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) return@withContext Result.failure(
-            Exception("NVIDIA API key missing. Add it in Settings.")
-        )
-        if (text.isBlank()) return@withContext Result.failure(Exception("Text input is empty."))
+        voice: String = "default",
+    ): Result<String> {
+        if (!ready) return Result.failure(Exception("TTS engine not initialized yet. Try again."))
+        if (text.isBlank()) return Result.failure(Exception("Text is empty."))
 
-        runCatching {
-            // Build JSON body safely
-            val jsonBody = buildTtsJson(model = model, input = text, voice = voice)
-            val body = jsonBody.toRequestBody(JSON_MEDIA)
-            val req = Request.Builder()
-                .url(TTS_URL)
-                .header("Authorization", "Bearer $apiKey")
-                .header("Content-Type", "application/json")
-                .post(body)
-                .build()
+        // Apply selected voice if available
+        if (voice != "default") {
+            tts?.voices?.find { it.name == voice }?.let { tts?.voice = it }
+        }
 
-            http.newCall(req).execute().use { resp ->
-                val bytes = resp.body?.bytes() ?: byteArrayOf()
-                when {
-                    resp.code == 404 -> throw Exception("TTS model not found (404). Select a different model.")
-                    resp.code == 401 || resp.code == 403 ->
-                        throw Exception("API key rejected. Check your nvapi- key in Settings.")
-                    !resp.isSuccessful ->
-                        throw Exception("TTS generation failed (HTTP ${resp.code})")
-                    bytes.isEmpty() -> throw Exception("TTS returned empty audio data.")
-                    else -> {
-                        val dir = File(context.filesDir, "tts_audio").apply { mkdirs() }
-                        val file = File(dir, "tts_${System.currentTimeMillis()}.mp3")
-                        FileOutputStream(file).use { out -> out.write(bytes) }
-                        file.absolutePath
-                    }
+        return suspendCancellableCoroutine { cont ->
+            val utteranceId = "tts_${System.currentTimeMillis()}"
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                override fun onDone(id: String?) {
+                    if (id == utteranceId) cont.resume(Result.success("spoken"))
                 }
+                @Deprecated("Deprecated in Java")
+                override fun onError(id: String?) {
+                    if (id == utteranceId) cont.resume(Result.failure(Exception("TTS playback error.")))
+                }
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    if (utteranceId == utteranceId) cont.resume(Result.failure(Exception("TTS error code $errorCode.")))
+                }
+            })
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            } else {
+                @Suppress("DEPRECATION")
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, hashMapOf(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID to utteranceId))
             }
-        }.recoverCatching { e -> throw Exception(e.message ?: "TTS error") }
+            if (result == TextToSpeech.ERROR) {
+                cont.resume(Result.failure(Exception("TTS speak() failed.")))
+            }
+        }
     }
 
-    private fun buildTtsJson(model: String, input: String, voice: String): String {
-        // Escape special characters for JSON
-        val safeInput = input
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-        return """{"model":"$model","input":"$safeInput","voice":"$voice"}"""
-    }
+    fun stop() { tts?.stop() }
+
+    fun release() { tts?.shutdown(); tts = null; ready = false }
 }

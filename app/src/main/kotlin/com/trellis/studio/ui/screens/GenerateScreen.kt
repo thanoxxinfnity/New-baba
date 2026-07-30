@@ -13,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,9 +47,6 @@ fun GenerateScreen(vm: GenerateViewModel = viewModel()) {
                     selectedTabIndex = selectedTab,
                     containerColor = SurfDark,
                     contentColor = Purple60,
-                    indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(tabPositions[selectedTab]), color = Purple60)
-                    },
                 ) {
                     tabs.forEachIndexed { i, title ->
                         Tab(
