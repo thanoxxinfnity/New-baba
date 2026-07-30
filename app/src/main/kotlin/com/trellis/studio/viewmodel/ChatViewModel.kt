@@ -6,10 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.ChatMessageEntity
 import com.trellis.studio.data.entity.ChatSessionEntity
-import com.trellis.studio.data.model.ChatMessage
+import com.trellis.studio.data.model.ChatTurn
+import com.trellis.studio.data.model.LlmModel
 import com.trellis.studio.data.model.NIM_LLM_MODELS
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.NimClient
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -30,14 +32,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
+    /** Collector for the open session's messages. Cancelled before starting a new one
+     *  so old sessions can't keep pushing their messages into the current screen. */
+    private var messagesJob: Job? = null
+
+    /** Guards against two sends racing and double-inserting. */
+    private var sendJob: Job? = null
+
     init {
-        // Load sessions
         viewModelScope.launch {
             db.chatDao().getAllSessions().collect { sessions ->
                 _state.update { it.copy(sessions = sessions) }
             }
         }
-        // Load selected model pref
         viewModelScope.launch {
             prefs.selectedLlm.collect { model ->
                 _state.update { it.copy(selectedModel = model) }
@@ -46,105 +53,157 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectModel(modelId: String) {
-        _state.update { it.copy(selectedModel = modelId) }
+        _state.update { it.copy(selectedModel = modelId, error = null) }
         viewModelScope.launch { prefs.setSelectedLlm(modelId) }
     }
 
-    /** Open an existing session or create a new one */
+    /** Open an existing session, replacing any previous message collector. */
     fun openSession(sessionId: Long?) {
+        messagesJob?.cancel()
+        messagesJob = null
         _state.update { it.copy(currentSessionId = sessionId, messages = emptyList(), error = null) }
         if (sessionId != null) {
-            viewModelScope.launch {
+            messagesJob = viewModelScope.launch {
                 db.chatDao().getMessages(sessionId).collect { msgs ->
-                    _state.update { it.copy(messages = msgs) }
+                    _state.update { current ->
+                        // Ignore late emissions from a session the user already left.
+                        if (current.currentSessionId == sessionId) current.copy(messages = msgs) else current
+                    }
                 }
             }
         }
     }
 
     fun newSession() {
+        messagesJob?.cancel()
+        messagesJob = null
         _state.update { it.copy(currentSessionId = null, messages = emptyList(), error = null) }
     }
 
     fun deleteSession(id: Long) = viewModelScope.launch {
-        db.chatDao().deleteSession(id)
+        runCatching { db.chatDao().deleteSession(id) }
         if (_state.value.currentSessionId == id) newSession()
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
 
     /**
-     * Send a user message (optionally with an image file path for vision models)
+     * Send a user message, optionally with an image (vision models only).
      */
     fun sendMessage(userText: String, imagePath: String? = null) {
-        val currentState = _state.value
-        if (userText.isBlank()) return
+        val text = userText.trim()
+        if (text.isBlank()) return
+        if (sendJob?.isActive == true) return
 
-        viewModelScope.launch {
+        sendJob = viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
+            try {
+                val modelId = _state.value.selectedModel
+                val model = NIM_LLM_MODELS.find { it.id == modelId }
 
-            // Ensure session exists
-            val sessionId = currentState.currentSessionId ?: run {
-                val title = userText.take(40).let { if (it.length == 40) "$it…" else it }
-                val model = currentState.selectedModel
-                db.chatDao().insertSession(ChatSessionEntity(title = title, model = model))
-            }
-            if (currentState.currentSessionId == null) {
-                openSession(sessionId)
-            }
-
-            // Save user message to DB
-            db.chatDao().insertMessage(
-                ChatMessageEntity(sessionId = sessionId, role = "user", content = userText, imagePath = imagePath)
-            )
-
-            // Build message history for API
-            val history = db.chatDao().getMessages(sessionId)
-                .first()
-                .map { entity ->
-                    val content = if (entity.role == "user" && entity.imagePath != null) {
-                        // For vision models: embed base64 image in content (simplified text-only for non-vision)
-                        if (isVisionModel(currentState.selectedModel)) {
-                            buildVisionContent(entity.content, entity.imagePath)
-                        } else entity.content
-                    } else entity.content
-                    ChatMessage(role = entity.role, content = content)
+                // Ensure a session exists, and open it so the UI follows along.
+                var sessionId = _state.value.currentSessionId
+                if (sessionId == null) {
+                    val title = text.take(40).let { if (text.length > 40) "$it…" else it }
+                    sessionId = db.chatDao().insertSession(
+                        ChatSessionEntity(title = title, model = modelId)
+                    )
+                    openSession(sessionId)
                 }
 
-            // Get preferences
-            val apiKey   = prefs.nvidiaKey.first()
-            val sysPrompt= prefs.systemPrompt.first()
-            val maxTok   = prefs.maxTokens.first()
-            val temp     = prefs.temperature.first().toDouble()
+                // Only keep the image if the model can actually see it.
+                val visionCapable = model?.isVision == true
+                val storedImage = imagePath?.takeIf { visionCapable }
 
-            val messagesForApi = buildList {
-                if (sysPrompt.isNotBlank()) add(ChatMessage("system", sysPrompt))
-                addAll(history)
-            }
-
-            // Call NVIDIA NIM
-            nim.chat(
-                apiKey = apiKey,
-                model  = currentState.selectedModel,
-                messages = messagesForApi,
-                maxTokens = maxTok,
-                temperature = temp,
-            ).onSuccess { response ->
                 db.chatDao().insertMessage(
-                    ChatMessageEntity(sessionId = sessionId, role = "assistant", content = response)
+                    ChatMessageEntity(
+                        sessionId = sessionId,
+                        role = "user",
+                        content = text,
+                        imagePath = storedImage,
+                    )
                 )
-                _state.update { it.copy(isLoading = false) }
-            }.onFailure { e ->
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Unknown error") }
+
+                val sysPrompt = prefs.systemPrompt.first()
+                val requestedMax = prefs.maxTokens.first()
+                val temp = prefs.temperature.first().toDouble()
+                val apiKey = prefs.nvidiaKey.first()
+
+                // Never ask for more output tokens than the model's window can hold.
+                val windowTokens = (model?.contextK ?: 128) * 1024
+                val maxTok = requestedMax.coerceAtMost(windowTokens / 2).coerceAtLeast(64)
+
+                val history = db.chatDao().getMessages(sessionId).first()
+                val turns = buildTurns(
+                    history = history,
+                    systemPrompt = sysPrompt,
+                    windowTokens = windowTokens,
+                    reservedTokens = maxTok,
+                    visionCapable = visionCapable,
+                )
+
+                nim.chat(
+                    apiKey = apiKey,
+                    model = modelId,
+                    turns = turns,
+                    maxTokens = maxTok,
+                    temperature = temp,
+                    isVisionModel = visionCapable,
+                ).onSuccess { result ->
+                    db.chatDao().insertMessage(
+                        ChatMessageEntity(
+                            sessionId = sessionId,
+                            role = "assistant",
+                            content = result.content,
+                            reasoningContent = result.reasoning,
+                        )
+                    )
+                    _state.update { it.copy(isLoading = false, error = null) }
+                }.onFailure { e ->
+                    _state.update { it.copy(isLoading = false, error = e.message ?: "Request failed") }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Anything unexpected (DB, encoding, …) must still clear the spinner.
+                _state.update { it.copy(isLoading = false, error = e.message ?: "Something went wrong") }
             }
         }
     }
 
-    private fun isVisionModel(modelId: String): Boolean =
-        NIM_LLM_MODELS.find { it.id == modelId }?.isVision ?: false
+    /**
+     * Converts stored messages into API turns, dropping the oldest ones so the
+     * conversation always fits the model's context window.
+     */
+    private fun buildTurns(
+        history: List<ChatMessageEntity>,
+        systemPrompt: String,
+        windowTokens: Int,
+        reservedTokens: Int,
+        visionCapable: Boolean,
+    ): List<ChatTurn> {
+        // ~4 chars per token, plus headroom for an inline image.
+        var budgetChars = ((windowTokens - reservedTokens).coerceAtLeast(512)) * 4
+        if (visionCapable && history.any { it.imagePath != null }) budgetChars -= 6000
+        budgetChars = budgetChars.coerceAtLeast(1000)
 
-    private fun buildVisionContent(text: String, imagePath: String?): String {
-        // Simple text fallback; full vision support would use multipart content array
-        return if (imagePath != null) "$text [Image attached]" else text
+        if (systemPrompt.isNotBlank()) budgetChars -= systemPrompt.length
+
+        // Walk newest → oldest so the most recent context always survives.
+        val kept = ArrayDeque<ChatMessageEntity>()
+        var used = 0
+        for (msg in history.asReversed()) {
+            val cost = msg.content.length + 16
+            if (used + cost > budgetChars && kept.isNotEmpty()) break
+            kept.addFirst(msg)
+            used += cost
+        }
+
+        return buildList {
+            if (systemPrompt.isNotBlank()) add(ChatTurn("system", systemPrompt))
+            kept.forEach { msg ->
+                add(ChatTurn(role = msg.role, text = msg.content, imagePath = msg.imagePath))
+            }
+        }
     }
 }

@@ -48,12 +48,18 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         selectedImageUri = uri
     }
 
-    // Scroll to bottom when messages change
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.size - 1)
+    // Scroll to bottom when messages arrive or the typing indicator appears.
+    LaunchedEffect(state.messages.size, state.isLoading) {
+        val last = listState.layoutInfo.totalItemsCount - 1
+        if (last >= 0) runCatching { listState.animateScrollToItem(last) }
     }
 
     val currentModel = NIM_LLM_MODELS.find { it.id == state.selectedModel }
+
+    // Drop a staged image if the user switches to a model that cannot see it.
+    LaunchedEffect(currentModel?.isVision) {
+        if (currentModel?.isVision != true) selectedImageUri = null
+    }
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         // Top bar
@@ -112,7 +118,9 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 
         // Messages
         if (state.messages.isEmpty() && !state.isLoading) {
-            EmptyChatHint()
+            // weight(1f), not fillMaxSize(): an unweighted fillMaxSize child eats all
+            // remaining height and pushes the input bar off the bottom of the screen.
+            EmptyChatHint(Modifier.weight(1f))
         } else {
             LazyColumn(
                 state = listState,
@@ -226,8 +234,8 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 }
 
 @Composable
-private fun EmptyChatHint() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+private fun EmptyChatHint(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Icon(Icons.Default.AutoAwesome, null, tint = Purple60, modifier = Modifier.size(48.dp))
             Text("Trellis Studio AI", style = MaterialTheme.typography.titleLarge, color = TextPrimary)

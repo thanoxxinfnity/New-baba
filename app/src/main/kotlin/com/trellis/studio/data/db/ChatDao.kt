@@ -24,7 +24,9 @@ interface ChatDao {
     suspend fun deleteAllSessions()
 
     // Messages
-    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY createdAt ASC")
+    // id is the tie-breaker: user + assistant messages can land on the same
+    // millisecond, which made them render in the wrong order.
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY createdAt ASC, id ASC")
     fun getMessages(sessionId: Long): Flow<List<ChatMessageEntity>>
 
     @Insert

@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -63,7 +64,9 @@ fun MainContent() {
     val currentRoute = backStack?.destination?.route
 
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        // imePadding is required: enableEdgeToEdge() stops the window from resizing,
+        // so without it the soft keyboard covers the chat input box.
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = BgDark,
         bottomBar = {
             NavigationBar(

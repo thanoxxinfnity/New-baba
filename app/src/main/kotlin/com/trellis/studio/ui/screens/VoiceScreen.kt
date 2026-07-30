@@ -2,7 +2,10 @@ package com.trellis.studio.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +21,17 @@ import com.trellis.studio.network.TtsClient
 import com.trellis.studio.ui.theme.*
 import kotlinx.coroutines.launch
 
+/** Named pitch/speed combinations, so users can get distinct-sounding voices. */
+private data class VoicePreset(val label: String, val pitch: Float, val speed: Float)
+
+private val PRESETS = listOf(
+    VoicePreset("Natural", 1.0f, 1.0f),
+    VoicePreset("Deep", 0.7f, 0.92f),
+    VoicePreset("Bright", 1.35f, 1.05f),
+    VoicePreset("Narrator", 0.9f, 0.85f),
+    VoicePreset("Chipmunk", 1.9f, 1.35f),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceScreen() {
@@ -26,49 +40,59 @@ fun VoiceScreen() {
     val ttsClient = remember { TtsClient(context) }
 
     var inputText by remember { mutableStateOf("") }
-    var selectedVoice by remember { mutableStateOf("default") }
+    var voices by remember { mutableStateOf<List<TtsClient.VoiceOption>>(emptyList()) }
+    var selectedVoice by remember { mutableStateOf<TtsClient.VoiceOption?>(null) }
+    var pitch by remember { mutableFloatStateOf(1.0f) }
+    var speed by remember { mutableFloatStateOf(1.0f) }
     var isSpeaking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showVoiceSheet by remember { mutableStateOf(false) }
 
-    // Give TTS time to init, then refresh voice list
-    var voices by remember { mutableStateOf(listOf("default")) }
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(800)
-        voices = listOf("default") + ttsClient.availableVoices
-    }
-
+    LaunchedEffect(Unit) { voices = ttsClient.voices() }
     DisposableEffect(Unit) { onDispose { ttsClient.release() } }
+
+    fun speak(text: String) {
+        if (text.isBlank()) return
+        scope.launch {
+            isSpeaking = true
+            error = null
+            ttsClient.speak(text, selectedVoice?.id, pitch, speed)
+                .onFailure { e -> error = e.message }
+            isSpeaking = false
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         Surface(color = SurfDark) {
-            Column {
-                Text(
-                    "Voice / TTS",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = TextPrimary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                )
-                // Info banner
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+            Text(
+                "Voice / TTS",
+                style = MaterialTheme.typography.titleLarge,
+                color = TextPrimary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+            )
+        }
+
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // Honest capability note
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Teal.copy(alpha = 0.12f)),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Row(Modifier.padding(12.dp)) {
                     Icon(Icons.Default.Info, null, tint = Teal, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Using Android built-in TTS — works offline, no API key needed.",
+                        "Offline device speech — no API key needed. Voice cloning isn't " +
+                            "available, but pitch and speed let you shape distinct voices.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Teal,
                     )
                 }
             }
-        }
 
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
             // Voice selector
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -82,22 +106,53 @@ fun VoiceScreen() {
                     Column(Modifier.weight(1f)) {
                         Text("Voice", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
                         Text(
-                            if (selectedVoice == "default") "System Default" else selectedVoice.take(32),
+                            selectedVoice?.label ?: "System Default",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextPrimary,
+                            maxLines = 1,
                         )
                     }
+                    Text(
+                        "${voices.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextDisabled,
+                    )
                     Icon(Icons.Default.ChevronRight, null, tint = TextSecondary)
                 }
             }
+
+            // Presets
+            Text("Voice Style", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PRESETS.forEach { preset ->
+                    val active = pitch == preset.pitch && speed == preset.speed
+                    FilterChip(
+                        selected = active,
+                        onClick = { pitch = preset.pitch; speed = preset.speed },
+                        label = { Text(preset.label, style = MaterialTheme.typography.labelMedium) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Purple40,
+                            selectedLabelColor = TextPrimary,
+                            containerColor = CardDark,
+                            labelColor = TextSecondary,
+                        ),
+                    )
+                }
+            }
+
+            SliderRow("Pitch", pitch) { pitch = it }
+            SliderRow("Speed", speed) { speed = it }
 
             // Text input
             OutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
                 label = { Text("Text to speak", color = TextSecondary) },
-                placeholder = { Text("Type something for the AI to say…", color = TextDisabled) },
-                modifier = Modifier.fillMaxWidth().height(160.dp),
+                placeholder = { Text("Type something to say…", color = TextDisabled) },
+                modifier = Modifier.fillMaxWidth().height(150.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary,
                     focusedBorderColor = Purple60, unfocusedBorderColor = BorderDark,
@@ -108,7 +163,6 @@ fun VoiceScreen() {
                 maxLines = 8,
             )
 
-            // Character count
             Text(
                 "${inputText.length} characters",
                 style = MaterialTheme.typography.labelSmall,
@@ -116,10 +170,9 @@ fun VoiceScreen() {
                 modifier = Modifier.align(Alignment.End),
             )
 
-            // Error banner
             error?.let {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Red.copy(0.12f)),
+                    colors = CardDefaults.cardColors(containerColor = Red.copy(alpha = 0.12f)),
                     shape = RoundedCornerShape(10.dp),
                 ) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -133,24 +186,16 @@ fun VoiceScreen() {
                 }
             }
 
-            // Speak / Stop row
+            // Speak / Stop
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = {
                         if (isSpeaking) {
                             ttsClient.stop()
                             isSpeaking = false
-                        } else {
-                            scope.launch {
-                                isSpeaking = true
-                                error = null
-                                ttsClient.synthesize("", "", inputText, selectedVoice)
-                                    .onFailure { e -> error = e.message }
-                                isSpeaking = false
-                            }
-                        }
+                        } else speak(inputText)
                     },
-                    enabled = inputText.isNotBlank(),
+                    enabled = isSpeaking || inputText.isNotBlank(),
                     modifier = Modifier.weight(1f).height(52.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isSpeaking) Red else Purple40,
@@ -164,13 +209,9 @@ fun VoiceScreen() {
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (isSpeaking) "Stop Speaking" else "Speak",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                    Text(if (isSpeaking) "Stop" else "Speak", style = MaterialTheme.typography.titleMedium)
                 }
 
-                // Clear button
                 OutlinedButton(
                     onClick = { inputText = ""; error = null },
                     modifier = Modifier.height(52.dp),
@@ -184,13 +225,12 @@ fun VoiceScreen() {
 
             // Quick phrases
             Text("Quick Phrases", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-            val quickPhrases = listOf(
+            listOf(
                 "Hello! How can I help you today?",
                 "The quick brown fox jumps over the lazy dog.",
-                "Welcome to Trellis Studio, powered by NVIDIA NIM.",
-                "Testing one two three. Audio quality check complete.",
-            )
-            quickPhrases.forEach { phrase ->
+                "Welcome to Trellis Studio.",
+                "Testing one two three. Audio check complete.",
+            ).forEach { phrase ->
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { inputText = phrase },
                     colors = CardDefaults.cardColors(containerColor = CardDark),
@@ -208,43 +248,73 @@ fun VoiceScreen() {
         }
     }
 
-    // Voice picker sheet
     if (showVoiceSheet) {
         ModalBottomSheet(onDismissRequest = { showVoiceSheet = false }, containerColor = SurfDark) {
-            Column(Modifier.fillMaxHeight(0.65f)) {
+            Column(Modifier.fillMaxHeight(0.7f)) {
                 Text(
                     "Select Voice",
                     style = MaterialTheme.typography.titleLarge,
                     color = TextPrimary,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
                 )
-                if (voices.size <= 1) {
+                if (voices.isEmpty()) {
                     Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("No voices loaded yet. Wait a moment.", color = TextSecondary)
+                        Text(
+                            "No offline voices found. Install Google Speech Services " +
+                                "and download a voice in system settings.",
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 } else {
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                    ) {
-                        items(voices.size) { i ->
-                            val v = voices[i]
-                            val label = if (v == "default") "System Default" else v
-                            ListItem(
-                                headlineContent = { Text(label, color = TextPrimary, maxLines = 1) },
-                                trailingContent = {
-                                    if (v == selectedVoice) Icon(Icons.Default.Check, null, tint = Purple60)
-                                },
-                                modifier = Modifier.clickable { selectedVoice = v; showVoiceSheet = false },
-                                colors = ListItemDefaults.colors(
-                                    containerColor = if (v == selectedVoice) CardDark else SurfDark,
-                                ),
-                            )
-                            HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                        item {
+                            VoiceRow("System Default", selectedVoice == null) {
+                                selectedVoice = null
+                                showVoiceSheet = false
+                            }
+                        }
+                        items(voices, key = { it.id }) { v ->
+                            VoiceRow(v.label, selectedVoice?.id == v.id) {
+                                selectedVoice = v
+                                showVoiceSheet = false
+                                speak("Hello, this is how I sound.")
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VoiceRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(label, color = TextPrimary, maxLines = 1) },
+        trailingContent = { if (selected) Icon(Icons.Default.Check, null, tint = Purple60) },
+        modifier = Modifier.clickable(onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = if (selected) CardDark else SurfDark),
+    )
+    HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
+}
+
+@Composable
+private fun SliderRow(label: String, value: Float, onChange: (Float) -> Unit) {
+    Column {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary, modifier = Modifier.weight(1f))
+            Text(String.format("%.2fx", value), style = MaterialTheme.typography.labelMedium, color = Purple60)
+        }
+        Slider(
+            value = value,
+            onValueChange = onChange,
+            valueRange = 0.5f..2.0f,
+            colors = SliderDefaults.colors(
+                thumbColor = Purple60,
+                activeTrackColor = Purple40,
+                inactiveTrackColor = BorderDark,
+            ),
+        )
     }
 }

@@ -2,21 +2,54 @@ package com.trellis.studio.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
 
 // ---- Chat Completions (NVIDIA NIM) ----
+
+/**
+ * Domain turn used by the app. [imagePath] is only honoured by vision models —
+ * NimClient converts it into the OpenAI-style multipart content array.
+ */
+data class ChatTurn(
+    val role: String,              // "system" | "user" | "assistant"
+    val text: String,
+    val imagePath: String? = null,
+)
+
 @Serializable
 data class ChatRequest(
     val model: String,
-    val messages: List<ChatMessage>,
+    val messages: List<ApiMessage>,
     @SerialName("max_tokens") val maxTokens: Int = 2048,
     val temperature: Double = 0.7,
     val stream: Boolean = false,
 )
 
+/**
+ * Wire format for a request message. [content] is a JsonElement because the API
+ * accepts either a plain string OR an array of {type:text|image_url} parts.
+ */
 @Serializable
-data class ChatMessage(
-    val role: String,  // "system" | "user" | "assistant"
-    val content: String,
+data class ApiMessage(
+    val role: String,
+    val content: JsonElement,
+)
+
+fun textMessage(role: String, text: String) = ApiMessage(role, JsonPrimitive(text))
+
+/** Builds the multipart content array that vision models require. */
+fun visionMessage(text: String, imageDataUrl: String) = ApiMessage(
+    role = "user",
+    content = buildJsonArray {
+        addJsonObject {
+            put("type", "text")
+            put("text", text)
+        }
+        addJsonObject {
+            put("type", "image_url")
+            putJsonObject("image_url") { put("url", imageDataUrl) }
+        }
+    },
 )
 
 @Serializable
@@ -26,9 +59,42 @@ data class ChatResponse(
 
 @Serializable
 data class ChatChoice(
-    val message: ChatMessage? = null,
-    val delta: ChatMessage? = null,
+    val message: ResponseMessage? = null,
+    val delta: ResponseMessage? = null,
+    @SerialName("finish_reason") val finishReason: String? = null,
 )
+
+/**
+ * Response message. Every field is nullable on purpose: NVIDIA reasoning models
+ * return `"content": null` when the reply is cut off mid-thought, and putting the
+ * answer in `reasoning_content` / `reasoning` instead. A non-null String here
+ * would make kotlinx.serialization throw and surface as a chat error.
+ */
+@Serializable
+data class ResponseMessage(
+    val role: String? = null,
+    val content: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
+    val reasoning: String? = null,
+)
+
+/** What NimClient hands back to the ViewModel. */
+data class ChatResult(
+    val content: String,
+    val reasoning: String? = null,
+)
+
+/** NVIDIA error envelope, so we can show the real message instead of raw JSON. */
+@Serializable
+data class NimError(
+    val detail: String? = null,
+    val message: String? = null,
+    val title: String? = null,
+    val error: NimErrorBody? = null,
+)
+
+@Serializable
+data class NimErrorBody(val message: String? = null)
 
 // ---- Image Generation (FLUX style) ----
 @Serializable
