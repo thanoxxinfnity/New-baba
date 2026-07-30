@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
@@ -14,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.trellis.studio.ui.theme.*
@@ -24,8 +26,10 @@ fun MessageBubble(
     content: String,
     reasoning: String? = null,
     imagePath: String? = null,
+    onCopy: (String) -> Unit = {},
 ) {
     val isUser = role == "user"
+    val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
@@ -48,58 +52,47 @@ fun MessageBubble(
                 )
                 Spacer(Modifier.height(4.dp))
             }
-            // Reasoning block (collapsible)
+            // Reasoning block — collapsed "Thought for …" chip, tap to expand.
             if (!isUser && !reasoning.isNullOrBlank()) {
-                ReasoningBlock(reasoning)
+                ThinkingBubble(reasoning = reasoning, streaming = false, elapsedSeconds = 0)
                 Spacer(Modifier.height(4.dp))
             }
             // Main bubble
             if (content.isNotBlank()) {
-                Box(
-                    Modifier
-                        .widthIn(max = 300.dp)
-                        .clip(RoundedCornerShape(
-                            topStart = if (isUser) 18.dp else 4.dp,
-                            topEnd   = if (isUser) 4.dp  else 18.dp,
-                            bottomStart = 18.dp, bottomEnd = 18.dp,
-                        ))
-                        .background(if (isUser) UserBubble else AssistBubble)
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextPrimary,
-                    )
+                if (isUser) {
+                    Box(
+                        Modifier
+                            .widthIn(max = 300.dp)
+                            .glass(
+                                shape = RoundedCornerShape(20.dp, 6.dp, 20.dp, 20.dp),
+                                fill = UserBubble.copy(alpha = 0.85f),
+                                border = Purple60.copy(alpha = 0.30f),
+                            )
+                            .padding(12.dp)
+                    ) {
+                        Text(content, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    }
+                } else {
+                    // Assistant text is markdown: prose plus copyable code blocks.
+                    Box(
+                        Modifier
+                            .widthIn(max = 330.dp)
+                            .glass(shape = RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp))
+                            .padding(12.dp)
+                    ) {
+                        MarkdownText(text = content, onCopyFeedback = onCopy)
+                    }
+                    // Copy the whole reply
+                    TextButton(
+                        onClick = { copyToClipboard(context, content); onCopy("Message copied") },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Icon(Icons.Default.ContentCopy, null, tint = TextDisabled, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Copy", style = MaterialTheme.typography.labelSmall, color = TextDisabled)
+                    }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ReasoningBlock(reasoning: String) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(
-        Modifier.widthIn(max = 300.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(CardDark)
-            .padding(10.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Thinking…", style = MaterialTheme.typography.labelMedium, color = Teal, modifier = Modifier.weight(1f))
-            IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(20.dp)) {
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null, tint = TextSecondary, modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-        AnimatedVisibility(visible = expanded) {
-            Text(reasoning, style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }

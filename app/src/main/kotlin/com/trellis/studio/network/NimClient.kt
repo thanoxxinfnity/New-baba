@@ -101,6 +101,112 @@ class NimClient {
         }.mapFailure()
     }
 
+    /**
+     * Streaming chat. Emits reasoning tokens and answer tokens as they arrive so
+     * the UI can show the model thinking live.
+     *
+     * Verified against the live API: reasoning models stream `delta.reasoning_content`
+     * first, then `delta.content` once they start answering.
+     */
+    suspend fun chatStream(
+        apiKey: String,
+        model: String,
+        turns: List<ChatTurn>,
+        maxTokens: Int = 2048,
+        temperature: Double = 0.7,
+        isVisionModel: Boolean = false,
+        onReasoning: suspend (String) -> Unit = {},
+        onContent: suspend (String) -> Unit = {},
+    ): Result<ChatResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(Exception("NVIDIA API key is missing. Add it in Settings."))
+        }
+
+        val apiMessages = turns.map { turn ->
+            val dataUrl = if (isVisionModel) turn.imagePath?.let { encodeImage(it) } else null
+            if (dataUrl != null) visionMessage(turn.text, dataUrl)
+            else textMessage(turn.role, turn.text)
+        }
+
+        val reqBody = ChatRequest(
+            model = model,
+            messages = apiMessages,
+            maxTokens = maxTokens.coerceIn(64, 32768),
+            temperature = temperature.coerceIn(0.0, 2.0),
+            stream = true,
+        )
+        val request = Request.Builder()
+            .url(BASE_URL)
+            .header("Authorization", "Bearer $apiKey")
+            .header("Accept", "text/event-stream")
+            .post(json.encodeToString(reqBody).toRequestBody(JSON_MEDIA))
+            .build()
+
+        runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val raw = response.body?.string().orEmpty()
+                    throw Exception(
+                        when (response.code) {
+                            401, 403 -> "API key rejected (${response.code}). Check your nvapi- key in Settings."
+                            404 -> "Model \"$model\" is not enabled for your NVIDIA account. Pick another model."
+                            429 -> "Rate limit reached. Wait a moment and retry."
+                            503, 529 -> "This model is overloaded right now. Try again or pick another model."
+                            502, 504 -> "NVIDIA's server didn't respond. Try again in a moment."
+                            else -> friendlyError(response.code, raw)
+                        }
+                    )
+                }
+
+                val answer = StringBuilder()
+                val thoughts = StringBuilder()
+                var finish: String? = null
+
+                val source = response.body?.source()
+                    ?: throw Exception("The server sent an empty stream.")
+
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload.isEmpty()) continue
+                    if (payload == "[DONE]") break
+
+                    val chunk = runCatching { json.decodeFromString<ChatResponse>(payload) }.getOrNull()
+                        ?: continue
+                    val choice = chunk.choices.firstOrNull() ?: continue
+                    choice.finishReason?.let { finish = it }
+
+                    val delta = choice.delta ?: choice.message ?: continue
+
+                    (delta.reasoningContent ?: delta.reasoning)?.takeIf { it.isNotEmpty() }?.let {
+                        thoughts.append(it)
+                        onReasoning(it)
+                    }
+                    delta.content?.takeIf { it.isNotEmpty() }?.let {
+                        answer.append(it)
+                        onContent(it)
+                    }
+                }
+
+                val content = answer.toString().trim()
+                val reasoning = thoughts.toString().trim().takeIf { it.isNotEmpty() }
+
+                if (content.isEmpty()) {
+                    if (finish == "length") {
+                        val hint = "The model ran out of tokens while thinking. " +
+                            "Raise Max Tokens in Settings, or pick a non-reasoning model."
+                        if (reasoning != null) return@use ChatResult(hint, reasoning)
+                        throw Exception(hint)
+                    }
+                    if (reasoning != null) return@use ChatResult(reasoning, null)
+                    throw Exception("The model returned an empty reply. Try again or switch model.")
+                }
+                ChatResult(content, reasoning)
+            }
+        }.mapFailure()
+    }
+
     /** Turns the API JSON into a usable reply, tolerating null content. */
     private fun parseReply(raw: String): ChatResult {
         val resp = runCatching { json.decodeFromString<ChatResponse>(raw) }.getOrNull()

@@ -42,6 +42,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showModelSelector by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
 
     // Image picker
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -61,6 +62,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         if (currentModel?.isVision != true) selectedImageUri = null
     }
 
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(BgDark)) {
         // Top bar
         TopAppBar(
@@ -133,10 +135,53 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                         content = msg.content,
                         reasoning = msg.reasoningContent,
                         imagePath = msg.imagePath,
+                        onCopy = { note -> scope.launch { snackbar.showSnackbar(note) } },
                     )
                 }
-                if (state.isLoading) {
-                    item { TypingIndicator() }
+
+                // Live reply: thinking bubble first, then the answer typing out.
+                if (state.isStreaming) {
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        ) {
+                            Box(
+                                Modifier.size(30.dp).clip(RoundedCornerShape(10.dp))
+                                    .background(Purple40),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("T", style = MaterialTheme.typography.labelMedium, color = Color.White)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (state.streamingReasoning.isNotEmpty()) {
+                                    ThinkingBubble(
+                                        reasoning = state.streamingReasoning,
+                                        streaming = state.isThinking,
+                                        elapsedSeconds = state.thoughtSeconds,
+                                    )
+                                }
+                                if (state.streamingContent.isNotEmpty()) {
+                                    Box(
+                                        Modifier
+                                            .widthIn(max = 330.dp)
+                                            .glass(shape = RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp))
+                                            .padding(12.dp)
+                                    ) {
+                                        StreamingText(
+                                            text = state.streamingContent,
+                                            streaming = true,
+                                            onCopyFeedback = { note ->
+                                                scope.launch { snackbar.showSnackbar(note) }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (state.isLoading) {
+                    item { NeuralTypingIndicator() }
                 }
             }
         }
@@ -210,6 +255,9 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                 }
             }
         }
+    }
+
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp))
     }
 
     // Model selector sheet

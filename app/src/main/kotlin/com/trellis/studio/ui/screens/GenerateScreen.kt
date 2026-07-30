@@ -30,7 +30,10 @@ import com.trellis.studio.viewmodel.GenerateViewModel
 import java.io.File
 
 @Composable
-fun GenerateScreen(vm: GenerateViewModel = viewModel()) {
+fun GenerateScreen(
+    vm: GenerateViewModel = viewModel(),
+    onOpenModel: (path: String, name: String) -> Unit = { _, _ -> },
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Image", "3D Model")
@@ -79,7 +82,7 @@ fun GenerateScreen(vm: GenerateViewModel = viewModel()) {
 
         when (selectedTab) {
             0 -> ImageGenerateTab(state = state, vm = vm)
-            1 -> ThreeDGenerateTab(state = state, vm = vm)
+            1 -> ThreeDGenerateTab(state = state, vm = vm, onOpenModel = onOpenModel)
         }
     }
 }
@@ -231,6 +234,7 @@ private fun ImageGenerateTab(
 private fun ThreeDGenerateTab(
     state: com.trellis.studio.viewmodel.GenerateUiState,
     vm: GenerateViewModel,
+    onOpenModel: (String, String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -322,15 +326,52 @@ private fun ThreeDGenerateTab(
             }
         }
 
+        // Sample generation — the input NVIDIA's endpoint actually accepts.
+        OutlinedButton(
+            onClick = vm::generateSample3d,
+            enabled = !state.isGenerating3d,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Teal),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Teal.copy(alpha = 0.5f)),
+        ) {
+            Icon(Icons.Default.Science, null, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Generate sample 3D (always works)")
+        }
+        Text(
+            "NVIDIA's TRELLIS endpoint currently accepts only its own sample image on " +
+                "this account, so uploaded photos may be rejected. The sample returns a " +
+                "real textured model you can view in 360°.",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDisabled,
+        )
+
         // Result
         state.generatedModelPath?.let { path ->
-            Card(colors = CardDefaults.cardColors(containerColor = CardDark), shape = RoundedCornerShape(14.dp)) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CheckCircle, null, tint = Teal, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("3D Model Ready!", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                        Text("Saved to Gallery", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardDark),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, null, tint = Teal, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("3D Model Ready", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                            Text("Saved to Gallery", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                    }
+                    Button(
+                        onClick = { onOpenModel(path, File(path).name) },
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Default.RotateRight, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("View in 360°", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }

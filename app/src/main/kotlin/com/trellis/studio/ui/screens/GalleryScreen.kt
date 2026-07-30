@@ -1,6 +1,7 @@
 package com.trellis.studio.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,7 +22,12 @@ import com.trellis.studio.ui.theme.*
 import com.trellis.studio.viewmodel.GalleryViewModel
 
 @Composable
-fun GalleryScreen(vm: GalleryViewModel = viewModel()) {
+fun GalleryScreen(
+    vm: GalleryViewModel = viewModel(),
+    onOpenModel: (path: String, name: String) -> Unit = { _, _ -> },
+    onOpenVoice: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+) {
     val allItems by vm.allGenerations.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("All", "Images", "3D Models")
@@ -29,8 +35,23 @@ fun GalleryScreen(vm: GalleryViewModel = viewModel()) {
     Column(Modifier.fillMaxSize().background(BgDark)) {
         Surface(color = SurfDark) {
             Column {
-                Text("Gallery", style = MaterialTheme.typography.titleLarge, color = TextPrimary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Gallery",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onOpenVoice) {
+                        Icon(Icons.Default.GraphicEq, "Voice", tint = TextSecondary)
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
+                    }
+                }
                 TabRow(
                     selectedTabIndex = selectedTab, containerColor = SurfDark, contentColor = Purple60,
                 ) {
@@ -65,7 +86,15 @@ fun GalleryScreen(vm: GalleryViewModel = viewModel()) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(filtered, key = { it.id }) { item ->
-                    GalleryCard(item = item, onDelete = { vm.delete(it) })
+                    GalleryCard(
+                        item = item,
+                        onDelete = { vm.delete(it) },
+                        onOpen = {
+                            if (item.type == "3d") {
+                                item.modelPath?.let { onOpenModel(it, "3D Model") }
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -73,11 +102,16 @@ fun GalleryScreen(vm: GalleryViewModel = viewModel()) {
 }
 
 @Composable
-private fun GalleryCard(item: GenerationEntity, onDelete: (GenerationEntity) -> Unit) {
+private fun GalleryCard(
+    item: GenerationEntity,
+    onDelete: (GenerationEntity) -> Unit,
+    onOpen: () -> Unit = {},
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = CardDark),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().aspectRatio(0.85f),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().aspectRatio(0.85f)
+            .clickable(enabled = item.type == "3d", onClick = onOpen),
     ) {
         Box(Modifier.fillMaxSize()) {
             if (item.type == "image" && item.imagePath != null) {
@@ -87,11 +121,16 @@ private fun GalleryCard(item: GenerationEntity, onDelete: (GenerationEntity) -> 
                     contentScale = ContentScale.Crop,
                 )
             } else if (item.type == "3d") {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.ViewInAr, null, tint = Teal, modifier = Modifier.size(48.dp))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 60.dp)) {
-                        Text("3D Model", style = MaterialTheme.typography.bodySmall, color = Teal)
-                    }
+                Column(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(Icons.Default.ViewInAr, null, tint = Teal, modifier = Modifier.size(46.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("3D Model", style = MaterialTheme.typography.bodySmall, color = Teal)
+                    Spacer(Modifier.height(2.dp))
+                    Text("Tap to view 360°", style = MaterialTheme.typography.labelSmall, color = TextDisabled)
                 }
             }
             // Overlay bottom bar

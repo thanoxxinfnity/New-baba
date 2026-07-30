@@ -22,7 +22,21 @@ data class ChatUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val selectedModel: String = AppPrefs.DEFAULT_LLM,
-)
+
+    // --- live streaming state, drives the thinking bubble ---
+    /** Reasoning tokens received so far for the in-flight reply. */
+    val streamingReasoning: String = "",
+    /** Answer tokens received so far for the in-flight reply. */
+    val streamingContent: String = "",
+    /** True while reasoning tokens are still arriving. */
+    val isThinking: Boolean = false,
+    /** Seconds the model spent thinking, shown on the collapsed bubble. */
+    val thoughtSeconds: Int = 0,
+) {
+    /** True once the reply has started but nothing has been persisted yet. */
+    val isStreaming: Boolean
+        get() = isLoading && (streamingReasoning.isNotEmpty() || streamingContent.isNotEmpty())
+}
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db   = AppDatabase.get(app)
@@ -96,7 +110,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (sendJob?.isActive == true) return
 
         sendJob = viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    streamingReasoning = "",
+                    streamingContent = "",
+                    isThinking = false,
+                    thoughtSeconds = 0,
+                )
+            }
             try {
                 val modelId = _state.value.selectedModel
                 val model = NIM_LLM_MODELS.find { it.id == modelId }
@@ -142,13 +165,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     visionCapable = visionCapable,
                 )
 
-                nim.chat(
+                val startedAt = System.currentTimeMillis()
+
+                nim.chatStream(
                     apiKey = apiKey,
                     model = modelId,
                     turns = turns,
                     maxTokens = maxTok,
                     temperature = temp,
                     isVisionModel = visionCapable,
+                    onReasoning = { token ->
+                        _state.update {
+                            it.copy(
+                                streamingReasoning = it.streamingReasoning + token,
+                                isThinking = true,
+                            )
+                        }
+                    },
+                    onContent = { token ->
+                        _state.update { current ->
+                            // First answer token ends the thinking phase and freezes the timer.
+                            val seconds = if (current.isThinking) {
+                                ((System.currentTimeMillis() - startedAt) / 1000).toInt().coerceAtLeast(1)
+                            } else current.thoughtSeconds
+                            current.copy(
+                                streamingContent = current.streamingContent + token,
+                                isThinking = false,
+                                thoughtSeconds = seconds,
+                            )
+                        }
+                    },
                 ).onSuccess { result ->
                     db.chatDao().insertMessage(
                         ChatMessageEntity(
@@ -158,15 +204,40 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             reasoningContent = result.reasoning,
                         )
                     )
-                    _state.update { it.copy(isLoading = false, error = null) }
+                    // Clear the live buffers now that the message is persisted.
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            error = null,
+                            streamingReasoning = "",
+                            streamingContent = "",
+                            isThinking = false,
+                        )
+                    }
                 }.onFailure { e ->
-                    _state.update { it.copy(isLoading = false, error = e.message ?: "Request failed") }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            error = e.message ?: "Request failed",
+                            streamingReasoning = "",
+                            streamingContent = "",
+                            isThinking = false,
+                        )
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // Anything unexpected (DB, encoding, …) must still clear the spinner.
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Something went wrong") }
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "Something went wrong",
+                        streamingReasoning = "",
+                        streamingContent = "",
+                        isThinking = false,
+                    )
+                }
             }
         }
     }

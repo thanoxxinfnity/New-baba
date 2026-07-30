@@ -102,26 +102,64 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Generate 3D model from source image */
+    /** Generate a 3D model from the selected source image. */
     fun generate3d() {
-        val s = _state.value
-        val imgPath = s.sourceImagePath ?: run {
+        val imgPath = _state.value.sourceImagePath ?: run {
             _state.update { it.copy(error = "Please select an image first.") }
             return
         }
         viewModelScope.launch {
             _state.update { it.copy(isGenerating3d = true, error = null, statusMessage = "Uploading image…") }
-            val apiKey = prefs.nvidiaKey.first()
-            val imageBytes = File(imgPath).readBytes()
-            _state.update { it.copy(statusMessage = "Generating 3D model…") }
+            try {
+                val apiKey = prefs.nvidiaKey.first()
+                val imageBytes = File(imgPath).readBytes()
+                val mime = if (imgPath.endsWith(".png", true)) "image/png" else "image/jpeg"
+                _state.update { it.copy(statusMessage = "Generating 3D model…") }
 
-            trellisClient.generateWithNvidia(apiKey, imageBytes)
-                .onSuccess { modelPath ->
-                    db.generationDao().insert(GenerationEntity(type = "3d", imagePath = imgPath, modelPath = modelPath))
-                    _state.update { it.copy(isGenerating3d = false, generatedModelPath = modelPath, statusMessage = null) }
-                }.onFailure { e ->
-                    _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
-                }
+                trellisClient.generateFromImage(apiKey, imageBytes, mime)
+                    .onSuccess { modelPath ->
+                        db.generationDao().insert(
+                            GenerationEntity(type = "3d", imagePath = imgPath, modelPath = modelPath)
+                        )
+                        _state.update {
+                            it.copy(isGenerating3d = false, generatedModelPath = modelPath, statusMessage = null)
+                        }
+                    }.onFailure { e ->
+                        _state.update {
+                            it.copy(isGenerating3d = false, error = e.message, statusMessage = null)
+                        }
+                    }
+            } catch (e: Exception) {
+                _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
+            }
+        }
+    }
+
+    /**
+     * Runs TRELLIS on NVIDIA's bundled sample. This is the one input the
+     * deployed endpoint accepts, so it always yields a real, viewable model.
+     */
+    fun generateSample3d() {
+        viewModelScope.launch {
+            _state.update {
+                it.copy(isGenerating3d = true, error = null, statusMessage = "Generating sample 3D model…")
+            }
+            try {
+                val apiKey = prefs.nvidiaKey.first()
+                trellisClient.generateSample(apiKey)
+                    .onSuccess { modelPath ->
+                        db.generationDao().insert(GenerationEntity(type = "3d", modelPath = modelPath))
+                        _state.update {
+                            it.copy(isGenerating3d = false, generatedModelPath = modelPath, statusMessage = null)
+                        }
+                    }.onFailure { e ->
+                        _state.update {
+                            it.copy(isGenerating3d = false, error = e.message, statusMessage = null)
+                        }
+                    }
+            } catch (e: Exception) {
+                _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
+            }
         }
     }
 }
