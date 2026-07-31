@@ -35,6 +35,9 @@ data class GenerateUiState(
 )
 
 class GenerateViewModel(app: Application) : AndroidViewModel(app) {
+    /** Shared, application-scoped queue so generation survives leaving the screen. */
+    val queue = ModelQueue.get(app)
+
     private val prefs   = AppPrefs(app)
     private val imgClient= ImageGenClient(app)
     private val trellisClient = TrellisClient(app)
@@ -139,37 +142,19 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setTextTo3dPrompt(v: String) = _state.update { it.copy(text3dPrompt = v) }
 
-    /** Text → 3D: the path that reliably accepts user input on this account. */
+    /**
+     * Queues one job per line, so several models can be asked for at once.
+     * The queue is application-scoped and keeps running in the background.
+     */
     fun generate3dFromText() {
-        val prompt = _state.value.text3dPrompt.trim()
-        if (prompt.isBlank()) {
+        val raw = _state.value.text3dPrompt
+        val prompts = raw.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+        if (prompts.isEmpty()) {
             _state.update { it.copy(error = "Describe the object you want.") }
             return
         }
-        if (_state.value.isGenerating3d) return
-        viewModelScope.launch {
-            _state.update {
-                it.copy(isGenerating3d = true, error = null, statusMessage = "Building 3D from text…")
-            }
-            try {
-                val apiKey = prefs.nvidiaKey.first()
-                trellisClient.generateFromText(apiKey, prompt)
-                    .onSuccess { modelPath ->
-                        db.generationDao().insert(
-                            GenerationEntity(type = "3d", prompt = prompt, modelPath = modelPath)
-                        )
-                        _state.update {
-                            it.copy(isGenerating3d = false, generatedModelPath = modelPath, statusMessage = null)
-                        }
-                    }.onFailure { e ->
-                        _state.update {
-                            it.copy(isGenerating3d = false, error = e.message, statusMessage = null)
-                        }
-                    }
-            } catch (e: Exception) {
-                _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
-            }
-        }
+        queue.enqueue(prompts)
+        _state.update { it.copy(text3dPrompt = "", error = null) }
     }
 
     /**

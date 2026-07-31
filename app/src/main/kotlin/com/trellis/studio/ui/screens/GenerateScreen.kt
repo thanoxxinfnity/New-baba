@@ -29,6 +29,7 @@ import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.ImageUtils
 import kotlinx.coroutines.launch
+import com.trellis.studio.viewmodel.ModelJob
 import com.trellis.studio.viewmodel.GenerateViewModel
 import java.io.File
 
@@ -277,9 +278,9 @@ private fun ThreeDGenerateTab(
         OutlinedTextField(
             value = state.text3dPrompt,
             onValueChange = vm::setTextTo3dPrompt,
-            label = { Text("Describe the object", color = TextSecondary) },
-            placeholder = { Text("a blue ceramic coffee mug", color = TextDisabled) },
-            modifier = Modifier.fillMaxWidth(),
+            label = { Text("One object per line", color = TextSecondary) },
+            placeholder = { Text("DOG\nCAR\nSpace Ship", color = TextDisabled) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary,
                 focusedBorderColor = Cyan, unfocusedBorderColor = BorderDark,
@@ -287,23 +288,82 @@ private fun ThreeDGenerateTab(
                 focusedLabelColor = Cyan,
             ),
             shape = RoundedCornerShape(14.dp),
-            maxLines = 3,
+            maxLines = 6,
         )
+        val queued = state.text3dPrompt.split("\n").count { it.isBlank().not() }
         Button(
             onClick = vm::generate3dFromText,
-            enabled = !state.isGenerating3d && state.text3dPrompt.isNotBlank(),
+            enabled = state.text3dPrompt.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(50.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Cyan, disabledContainerColor = BorderDark),
             shape = RoundedCornerShape(14.dp),
         ) {
-            if (state.isGenerating3d) {
-                CircularProgressIndicator(Modifier.size(17.dp), color = BgDark, strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(state.statusMessage ?: "Working…", color = BgDark)
-            } else {
-                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(17.dp), tint = BgDark)
-                Spacer(Modifier.width(8.dp))
-                Text("Generate 3D from text", style = MaterialTheme.typography.titleMedium, color = BgDark)
+            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(17.dp), tint = BgDark)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (queued > 1) "Queue $queued models" else "Generate 3D",
+                style = MaterialTheme.typography.titleMedium,
+                color = BgDark,
+            )
+        }
+
+        // ---- Live queue ---------------------------------------------------
+        val jobs by vm.queue.jobs.collectAsStateWithLifecycle()
+        if (jobs.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Queue",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { vm.queue.clearFinished() }) {
+                    Text("Clear done", color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            jobs.forEach { job ->
+                val tint = when (job.status) {
+                    ModelJob.Status.DONE -> Teal
+                    ModelJob.Status.FAILED -> Red
+                    ModelJob.Status.RUNNING -> Cyan
+                    else -> TextDisabled
+                }
+                Row(
+                    Modifier.fillMaxWidth()
+                        .glass(
+                            shape = RoundedCornerShape(14.dp),
+                            glow = if (job.status == ModelJob.Status.RUNNING) Cyan else null,
+                        )
+                        .clickable(enabled = job.modelPath != null) {
+                            job.modelPath?.let { onOpenModel(it, job.prompt) }
+                        }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when (job.status) {
+                        ModelJob.Status.RUNNING ->
+                            CircularProgressIndicator(Modifier.size(16.dp), color = Cyan, strokeWidth = 2.dp)
+                        ModelJob.Status.DONE ->
+                            Icon(Icons.Default.CheckCircle, null, tint = Teal, modifier = Modifier.size(18.dp))
+                        ModelJob.Status.FAILED ->
+                            Icon(Icons.Default.ErrorOutline, null, tint = Red, modifier = Modifier.size(18.dp))
+                        else ->
+                            Icon(Icons.Default.Schedule, null, tint = TextDisabled, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(job.prompt, style = MaterialTheme.typography.bodyMedium, color = TextPrimary, maxLines = 1)
+                        Text(job.progressLabel, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 2)
+                    }
+                    if (job.status == ModelJob.Status.DONE) {
+                        Icon(Icons.Default.ChevronRight, null, tint = Teal, modifier = Modifier.size(18.dp))
+                    }
+                    if (job.status == ModelJob.Status.FAILED) {
+                        TextButton(onClick = { vm.queue.retry(job.id) }) {
+                            Text("Retry", color = Cyan, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
             }
         }
 

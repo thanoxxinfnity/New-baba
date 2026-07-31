@@ -30,8 +30,18 @@ import java.io.FileOutputStream
  * uploaded, which [generateFromImage] reports honestly instead of failing.
  */
 class TrellisClient(private val context: Context) {
+    // Timings measured against the live service: a successful text-to-3D job
+    // answers in 12-14s, while a failing one always stalls for ~90s before
+    // returning 500. Cutting the read timeout well below that turns a long
+    // dead wait into a quick retry, which is what actually gets a model out.
     private val http = OkHttpClient.Builder()
-        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
+    /** Image-to-3D and polling legitimately take longer than a text prompt. */
+    private val slowHttp = OkHttpClient.Builder()
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(300, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
@@ -42,6 +52,9 @@ class TrellisClient(private val context: Context) {
         const val TRELLIS_URL = "https://ai.api.nvidia.com/v1/genai/microsoft/trellis"
         const val ASSETS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
         const val STATUS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
+        // Failures are a capacity coin-flip; a generous attempt count costs
+        // little now that each attempt aborts at 45s instead of 90s.
+        const val MAX_ATTEMPTS = 8
     }
 
     /**
@@ -49,7 +62,11 @@ class TrellisClient(private val context: Context) {
      * real textured GLB. Any extra field (seed, mode, …) makes the service 500,
      * so the body deliberately carries nothing else.
      */
-    suspend fun generateFromText(apiKey: String, prompt: String): Result<String> =
+    suspend fun generateFromText(
+        apiKey: String,
+        prompt: String,
+        onAttempt: suspend (attempt: Int, total: Int) -> Unit = { _, _ -> },
+    ): Result<String> =
         withContext(Dispatchers.IO) {
             if (apiKey.isBlank()) {
                 return@withContext Result.failure(Exception("NVIDIA API key is missing. Add it in Settings."))
@@ -64,18 +81,20 @@ class TrellisClient(private val context: Context) {
             // every tested prompt (sword, robot, car, tree, head) succeeded within
             // five tries, so retry generously with backoff.
             var last: Throwable? = null
-            repeat(5) { attempt ->
+            repeat(MAX_ATTEMPTS) { attempt ->
+                onAttempt(attempt + 1, MAX_ATTEMPTS)
                 runCatching { invoke(apiKey, body, null) }
                     .onSuccess { return@withContext Result.success(it) }
                     .onFailure { e ->
                         last = e
-                        if (attempt < 4) delay(5_000L * (attempt + 1))
+                        // Short pause only; the win comes from retrying, not waiting.
+                        if (attempt < MAX_ATTEMPTS - 1) delay(3_000)
                     }
             }
             Result.failure(
                 Exception(
-                    "NVIDIA's 3D service kept failing after 5 attempts — it's overloaded. " +
-                        "Try again in a minute. (${last?.message ?: "no detail"})"
+                    "NVIDIA's 3D service refused $MAX_ATTEMPTS times in a row — it's overloaded " +
+                        "right now, not a problem with your prompt. Try again shortly."
                 )
             )
         }
@@ -160,7 +179,8 @@ class TrellisClient(private val context: Context) {
 
         val request = builder.post(bodyJson.toRequestBody(JSON_MEDIA)).build()
 
-        val payload = http.newCall(request).execute().use { resp ->
+        val client = if (assetId != null) slowHttp else http
+        val payload = client.newCall(request).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             when {
                 resp.code == 401 || resp.code == 403 ->
