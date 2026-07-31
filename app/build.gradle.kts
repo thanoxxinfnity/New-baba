@@ -18,9 +18,24 @@ android {
         versionName = "2.0"
     }
 
+    defaultConfig {
+        // Real phones are ARM; the x86 Filament libs only serve emulators and
+        // cost ~14 MB, so they are left out of the shipped APK.
+        ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a") }
+    }
+
+    packaging {
+        resources.excludes += setOf(
+            "META-INF/*.version", "META-INF/*.kotlin_module",
+            "DebugProbesKt.bin", "kotlin-tooling-metadata.json",
+            "META-INF/com/android/build/gradle/*",
+        )
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
