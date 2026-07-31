@@ -7,15 +7,16 @@ import androidx.room.RoomDatabase
 import com.trellis.studio.data.entity.*
 
 @Database(
-    entities = [ChatSessionEntity::class, ChatMessageEntity::class,
+    entities = [ChatSessionEntity::class, ChatMessageEntity::class, VoiceEntity::class,
                 GenerationEntity::class, TtsHistoryEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun generationDao(): GenerationDao
     abstract fun ttsDao(): TtsDao
+    abstract fun voiceDao(): VoiceDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

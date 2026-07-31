@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.protobuf)
 }
 
 android {
@@ -78,6 +79,30 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.sceneview)
 
+    // NVIDIA Riva TTS is gRPC-only — there is no JSON/HTTP interface for it.
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.protobuf.lite)
+    implementation(libs.grpc.stub)
+    implementation(libs.protobuf.javalite)
+    compileOnly(libs.javax.annotation.api)
+
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+// Generates the Riva TTS stubs. javalite/lite keeps the generated code small
+// enough for an app, which the full protobuf runtime would not be.
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.get()}" }
+    plugins {
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpc.get()}"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins { create("java") { option("lite") } }
+            task.plugins { create("grpc") { option("lite") } }
+        }
+    }
 }
