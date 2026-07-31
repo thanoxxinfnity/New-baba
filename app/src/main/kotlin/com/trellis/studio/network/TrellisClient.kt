@@ -54,7 +54,7 @@ class TrellisClient(private val context: Context) {
         const val STATUS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
         // Failures are a capacity coin-flip; a generous attempt count costs
         // little now that each attempt aborts at 45s instead of 90s.
-        const val MAX_ATTEMPTS = 20
+        const val MAX_ATTEMPTS = 8
     }
 
     /**

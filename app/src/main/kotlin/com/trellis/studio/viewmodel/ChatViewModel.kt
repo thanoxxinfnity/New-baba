@@ -14,6 +14,8 @@ import com.trellis.studio.data.model.NIM_LLM_MODELS
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.ImageGenClient
 import com.trellis.studio.network.NimClient
+import com.trellis.studio.network.RemoteApkBuilder
+import com.trellis.studio.network.TtydClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -51,6 +53,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs= AppPrefs(app)
     private val nim  = NimClient()
     private val imageClient = ImageGenClient(app)
+    private val ttyd = TtydClient()
+    private val apkBuilder = RemoteApkBuilder(ttyd)
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -169,6 +173,82 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Writes an Android project with the model, then builds it on the user's
+     * terminal. If that terminal is offline the code is still delivered, with
+     * instructions — the work is not lost.
+     */
+    private suspend fun buildAppReply(sessionId: Long, request: String) {
+        _state.update { it.copy(statusMessage = "Writing the project…") }
+        val apiKey = prefs.nvidiaKey.first()
+
+        val reply = nim.chat(
+            apiKey = apiKey,
+            model = _state.value.selectedModel,
+            turns = AppBuilder.projectPrompt(request),
+            maxTokens = 4096,
+            temperature = 0.3,
+        ).getOrElse { e ->
+            db.chatDao().insertMessage(
+                ChatMessageEntity(
+                    sessionId = sessionId, role = "assistant",
+                    content = "Couldn't write the project: ${e.message}",
+                )
+            )
+            _state.update { it.copy(isLoading = false, statusMessage = null) }
+            return
+        }
+
+        val files = AppBuilder.withDefaults(AppBuilder.parseProject(reply.content))
+        // Always show the code, whether or not a build is possible.
+        db.chatDao().insertMessage(
+            ChatMessageEntity(sessionId = sessionId, role = "assistant", content = reply.content)
+        )
+
+        if (files.isEmpty()) {
+            _state.update { it.copy(isLoading = false, statusMessage = null) }
+            return
+        }
+
+        val terminalUrl = prefs.buildServerUrl.first()
+        if (terminalUrl.isBlank()) {
+            db.chatDao().insertMessage(
+                ChatMessageEntity(
+                    sessionId = sessionId, role = "assistant",
+                    content = "No build terminal is set. Add its URL in Settings, " +
+                        "then say \"terminal is on\" and I'll compile this.",
+                )
+            )
+            _state.update { it.copy(isLoading = false, statusMessage = null) }
+            return
+        }
+
+        _state.update { it.copy(statusMessage = "Building APK on your machine…") }
+        apkBuilder.build(terminalUrl, "voidapp", files)
+            .onSuccess { artifact ->
+                db.chatDao().insertMessage(
+                    ChatMessageEntity(
+                        sessionId = sessionId, role = "assistant",
+                        content = "**APK ready — ${artifact.name}**\n\n" +
+                            "Download: ${artifact.url}\n\n" +
+                            "It's also in the Builds tab, where you can install it directly.",
+                    )
+                )
+            }
+            .onFailure { e ->
+                val offline = e.message?.contains("offline", true) == true ||
+                    e.message?.contains("reach", true) == true
+                db.chatDao().insertMessage(
+                    ChatMessageEntity(
+                        sessionId = sessionId, role = "assistant",
+                        content = if (offline) AppBuilder.OFFLINE_HINT
+                        else "Build failed: ${e.message}",
+                    )
+                )
+            }
+        _state.update { it.copy(isLoading = false, statusMessage = null) }
+    }
+
+    /**
      * Send a user message, optionally with an image (vision models only).
      */
     fun sendMessage(userText: String, imagePath: String? = null) {
@@ -213,6 +293,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         imagePath = storedImage,
                     )
                 )
+
+                // "Build me an app" → write the project, then compile it on the
+                // user's own machine and hand back a downloadable APK.
+                if (AppBuilder.looksLikeAppRequest(text)) {
+                    buildAppReply(sessionId, AppBuilder.cleanRequest(text))
+                    return@launch
+                }
 
                 // Image request? Generate a picture and render it in the thread.
                 if (_state.value.imageMode || looksLikeImageRequest(text)) {

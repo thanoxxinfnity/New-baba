@@ -23,7 +23,8 @@ import java.nio.ByteOrder
 object AudioConverter {
 
     private const val TARGET_RATE = 22050
-    private const val MAX_SECONDS = 40
+    // Matches the zero-shot cloner's 3-10s prompt window.
+    private const val MAX_SECONDS = 9
     private const val TIMEOUT_US = 10_000L
 
     suspend fun toWav(context: Context, uri: Uri): Result<File> = withContext(Dispatchers.IO) {

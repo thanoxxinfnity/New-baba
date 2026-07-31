@@ -33,7 +33,10 @@ data class ModelJob(
     val progressLabel: String
         get() = when (status) {
             Status.QUEUED -> "Waiting…"
-            Status.RUNNING -> if (attempt > 0) "Generating — try $attempt of $totalAttempts" else "Starting…"
+            Status.RUNNING -> when {
+                attempt > 1 -> "Server busy — retry $attempt of $totalAttempts"
+                else -> "Generating…"
+            }
             Status.DONE -> "Ready"
             Status.FAILED -> error ?: "Failed"
         }

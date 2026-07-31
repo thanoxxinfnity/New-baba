@@ -103,9 +103,29 @@ class NvidiaTtsClient {
         if (!voiceSample.exists() || voiceSample.length() < 1024) {
             return Result.failure(Exception("Voice sample is missing or too short. Record at least 3 seconds."))
         }
-        val wav = runCatching { WavFile.read(voiceSample) }.getOrElse {
+        val raw = runCatching { WavFile.read(voiceSample) }.getOrElse {
             return Result.failure(Exception("Could not read the voice sample: ${it.message}"))
         }
+
+        // The service enforces a 3-10s prompt and rejects anything outside it
+        // ("Audio prompt duration (12.6) ... is not between 3-10 seconds"), so
+        // trim a long recording rather than letting it bounce.
+        val bytesPerSecond = raw.sampleRate * 2 * raw.channels
+        val seconds = raw.pcm.size.toFloat() / bytesPerSecond
+        if (seconds < MIN_PROMPT_SECONDS) {
+            return Result.failure(
+                Exception(
+                    "Voice sample is only ${"%.1f".format(seconds)}s — the cloner needs at " +
+                        "least ${MIN_PROMPT_SECONDS}s of speech."
+                )
+            )
+        }
+        val wav = if (seconds > MAX_PROMPT_SECONDS) {
+            // Keep the middle, which is usually cleaner than the start or end.
+            val keep = (bytesPerSecond * MAX_PROMPT_SECONDS).toInt().let { it - it % 2 }
+            val start = ((raw.pcm.size - keep) / 2).let { it - it % 2 }.coerceAtLeast(0)
+            raw.copy(pcm = raw.pcm.copyOfRange(start, (start + keep).coerceAtMost(raw.pcm.size)))
+        } else raw
 
         return call(apiKey, Functions.ZERO_SHOT, timeoutSeconds = CLONE_TIMEOUT_SECONDS) { stub ->
             val zeroShot = ZeroShotData.newBuilder()
@@ -202,6 +222,9 @@ class NvidiaTtsClient {
         // Cloning either answers reasonably fast or not at all; a long wait just
         // leaves the user staring at a spinner.
         const val CLONE_TIMEOUT_SECONDS = 100L
+        // Hard limits reported by the zero-shot model itself.
+        const val MIN_PROMPT_SECONDS = 3f
+        const val MAX_PROMPT_SECONDS = 9f
         const val DEFAULT_VOICE = "Magpie-Multilingual.EN-US.Sofia"
 
         val FUNCTION_ID_KEY: Metadata.Key<String> =

@@ -124,6 +124,7 @@ class VoiceRecorder(private val context: Context) {
         const val BITS = 16
         const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         const val FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        const val MAX_BYTES = SAMPLE_RATE * 2 * 60      // ~60 seconds
+        // The clone service only accepts a 3-10s prompt, so never record past 9s.
+        const val MAX_BYTES = SAMPLE_RATE * 2 * 9
     }
 }
