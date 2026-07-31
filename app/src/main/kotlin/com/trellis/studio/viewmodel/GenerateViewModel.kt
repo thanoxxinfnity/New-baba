@@ -28,6 +28,7 @@ data class GenerateUiState(
     val selected3dBackend: String = "nvidia",   // "nvidia" | "fal" | "pollinations"
     val isGenerating3d: Boolean = false,
     val generatedModelPath: String? = null,
+    val text3dPrompt: String = "",
     // shared
     val error: String? = null,
     val statusMessage: String? = null,
@@ -58,6 +59,7 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
     fun setImageSeed(v: Long)        = _state.update { it.copy(imageSeed = v) }
     fun setSourceImagePath(v: String?) = _state.update { it.copy(sourceImagePath = v) }
     fun clearError()                 = _state.update { it.copy(error = null, statusMessage = null) }
+    fun showError(msg: String)       = _state.update { it.copy(error = msg) }
 
     fun selectImageModel(id: String) {
         _state.update { it.copy(selectedImageModelId = id) }
@@ -120,6 +122,41 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
                     .onSuccess { modelPath ->
                         db.generationDao().insert(
                             GenerationEntity(type = "3d", imagePath = imgPath, modelPath = modelPath)
+                        )
+                        _state.update {
+                            it.copy(isGenerating3d = false, generatedModelPath = modelPath, statusMessage = null)
+                        }
+                    }.onFailure { e ->
+                        _state.update {
+                            it.copy(isGenerating3d = false, error = e.message, statusMessage = null)
+                        }
+                    }
+            } catch (e: Exception) {
+                _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
+            }
+        }
+    }
+
+    fun setTextTo3dPrompt(v: String) = _state.update { it.copy(text3dPrompt = v) }
+
+    /** Text → 3D: the path that reliably accepts user input on this account. */
+    fun generate3dFromText() {
+        val prompt = _state.value.text3dPrompt.trim()
+        if (prompt.isBlank()) {
+            _state.update { it.copy(error = "Describe the object you want.") }
+            return
+        }
+        if (_state.value.isGenerating3d) return
+        viewModelScope.launch {
+            _state.update {
+                it.copy(isGenerating3d = true, error = null, statusMessage = "Building 3D from text…")
+            }
+            try {
+                val apiKey = prefs.nvidiaKey.first()
+                trellisClient.generateFromText(apiKey, prompt)
+                    .onSuccess { modelPath ->
+                        db.generationDao().insert(
+                            GenerationEntity(type = "3d", prompt = prompt, modelPath = modelPath)
                         )
                         _state.update {
                             it.copy(isGenerating3d = false, generatedModelPath = modelPath, statusMessage = null)

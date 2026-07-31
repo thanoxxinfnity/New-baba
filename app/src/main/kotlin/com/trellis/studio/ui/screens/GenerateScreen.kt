@@ -27,6 +27,8 @@ import com.trellis.studio.data.model.NIM_IMAGE_MODELS
 import com.trellis.studio.ui.components.*
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
+import com.trellis.studio.util.ImageUtils
+import kotlinx.coroutines.launch
 import com.trellis.studio.viewmodel.GenerateViewModel
 import java.io.File
 
@@ -246,11 +248,14 @@ private fun ThreeDGenerateTab(
     onOpenModel: (String, String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
-            val file = File(context.cacheDir, "trellis_src_${System.currentTimeMillis()}.jpg")
-            context.contentResolver.openInputStream(uri)?.use { ins -> file.outputStream().use { out -> ins.copyTo(out) } }
-            vm.setSourceImagePath(file.absolutePath)
+            scope.launch {
+                ImageUtils.prepareForUpload(context, it, maxDimension = 1024)
+                    .onSuccess { file -> vm.setSourceImagePath(file.absolutePath) }
+                    .onFailure { e -> vm.showError(e.message ?: "Could not read that image") }
+            }
         }
     }
 
@@ -266,6 +271,55 @@ private fun ThreeDGenerateTab(
                 }
             }
         }
+
+        // ---- Text -> 3D: the path that accepts user input on this account ----
+        Text("Text to 3D", style = MaterialTheme.typography.labelMedium, color = Cyan)
+        OutlinedTextField(
+            value = state.text3dPrompt,
+            onValueChange = vm::setTextTo3dPrompt,
+            label = { Text("Describe the object", color = TextSecondary) },
+            placeholder = { Text("a blue ceramic coffee mug", color = TextDisabled) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary,
+                focusedBorderColor = Cyan, unfocusedBorderColor = BorderDark,
+                focusedContainerColor = CardDark, unfocusedContainerColor = CardDark,
+                focusedLabelColor = Cyan,
+            ),
+            shape = RoundedCornerShape(14.dp),
+            maxLines = 3,
+        )
+        Button(
+            onClick = vm::generate3dFromText,
+            enabled = !state.isGenerating3d && state.text3dPrompt.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Cyan, disabledContainerColor = BorderDark),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            if (state.isGenerating3d) {
+                CircularProgressIndicator(Modifier.size(17.dp), color = BgDark, strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(state.statusMessage ?: "Working…", color = BgDark)
+            } else {
+                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(17.dp), tint = BgDark)
+                Spacer(Modifier.width(8.dp))
+                Text("Generate 3D from text", style = MaterialTheme.typography.titleMedium, color = BgDark)
+            }
+        }
+
+        HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
+
+        Text(
+            "Image to 3D",
+            style = MaterialTheme.typography.labelMedium,
+            color = TextSecondary,
+        )
+        Text(
+            "NVIDIA's endpoint rejects uploaded photos on this account — it only " +
+                "accepts its own sample. Text to 3D above works with anything you type.",
+            style = MaterialTheme.typography.labelSmall,
+            color = Amber,
+        )
 
         // Backend selector
         Text("3D Backend", style = MaterialTheme.typography.labelMedium, color = TextSecondary)

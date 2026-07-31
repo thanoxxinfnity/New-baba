@@ -8,7 +8,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -41,6 +43,34 @@ class TrellisClient(private val context: Context) {
         const val ASSETS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
         const val STATUS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
     }
+
+    /**
+     * Text → 3D. Verified live: {"prompt":"a blue ceramic coffee mug"} returns a
+     * real textured GLB. Any extra field (seed, mode, …) makes the service 500,
+     * so the body deliberately carries nothing else.
+     */
+    suspend fun generateFromText(apiKey: String, prompt: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(Exception("NVIDIA API key is missing. Add it in Settings."))
+            }
+            if (prompt.isBlank()) {
+                return@withContext Result.failure(Exception("Describe what to build first."))
+            }
+            val body = buildJsonObject { put("prompt", prompt.trim()) }.toString()
+            // The endpoint cold-starts and 500s for the first call fairly often,
+            // so a couple of retries is the difference between working and not.
+            var last: Throwable? = null
+            repeat(3) { attempt ->
+                runCatching { invoke(apiKey, body, null) }
+                    .onSuccess { return@withContext Result.success(it) }
+                    .onFailure { e ->
+                        last = e
+                        if (attempt < 2) delay(6_000)
+                    }
+            }
+            Result.failure(last ?: Exception("Text-to-3D failed."))
+        }
 
     /** Runs the sample TRELLIS job, which is the only input this deployment accepts. */
     suspend fun generateSample(apiKey: String): Result<String> = withContext(Dispatchers.IO) {

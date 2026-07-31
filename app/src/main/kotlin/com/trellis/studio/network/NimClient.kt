@@ -253,8 +253,9 @@ class NimClient {
     private fun encodeImage(path: String): String? {
         val file = File(path)
         if (!file.exists() || file.length() == 0L) return null
-        // NVIDIA caps inline images; ~180KB of base64 keeps us well inside the limit.
-        if (file.length() > 900_000) return null
+        // Callers resize before attaching (ImageUtils); this is just a backstop
+        // against something enormous slipping through.
+        if (file.length() > 4_000_000) return null
         val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
         val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val mime = if (path.endsWith(".png", true)) "image/png" else "image/jpeg"

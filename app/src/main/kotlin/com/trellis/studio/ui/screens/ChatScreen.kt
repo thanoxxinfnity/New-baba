@@ -25,6 +25,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.data.model.NIM_LLM_MODELS
 import com.trellis.studio.ui.components.*
 import com.trellis.studio.ui.theme.*
+import com.trellis.studio.util.ImageUtils
 import com.trellis.studio.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 import java.io.File
@@ -250,15 +251,22 @@ fun ChatScreen(
                     FloatingActionButton(
                         onClick = {
                             if (canSend) {
-                                val imgPath = selectedImageUri?.let { uri ->
-                                    val input: InputStream? = context.contentResolver.openInputStream(uri)
-                                    val file = File(context.cacheDir, "chat_img_${System.currentTimeMillis()}.jpg")
-                                    input?.use { ins -> file.outputStream().use { out -> ins.copyTo(out) } }
-                                    file.absolutePath
-                                }
-                                vm.sendMessage(inputText, imgPath)
+                                val text = inputText
+                                val uri = selectedImageUri
                                 inputText = ""
                                 selectedImageUri = null
+                                scope.launch {
+                                    // Photos are several MB; resize off the main thread
+                                    // before attaching, or the upload is dropped.
+                                    val imgPath = uri?.let {
+                                        ImageUtils.prepareForUpload(context, it)
+                                            .onFailure { e ->
+                                                snackbar.showSnackbar(e.message ?: "Could not attach the image")
+                                            }
+                                            .getOrNull()?.absolutePath
+                                    }
+                                    vm.sendMessage(text, imgPath)
+                                }
                             }
                         },
                         modifier = Modifier.size(48.dp),
