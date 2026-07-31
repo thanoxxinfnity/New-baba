@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.data.model.NIM_LLM_MODELS
@@ -152,7 +153,7 @@ fun ChatScreen(
                                     .background(Purple40),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("T", style = MaterialTheme.typography.labelMedium, color = Color.White)
+                                Text("V", style = MaterialTheme.typography.labelMedium, color = Color.White)
                             }
                             Spacer(Modifier.width(8.dp))
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -311,8 +312,8 @@ private fun EmptyChatHint(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Icon(Icons.Default.AutoAwesome, null, tint = Purple60, modifier = Modifier.size(48.dp))
-            Text("Trellis Studio AI", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
-            Text("Select a model and start chatting", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+            Text("VOID", style = MaterialTheme.typography.headlineMedium.copy(brush = NeonBrush, letterSpacing = 6.sp))
+            Text("Ask anything. Build anything.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
         }
     }
 }

@@ -147,7 +147,7 @@ object ModelExporter {
     // --------------------------------------------------------------- writers
 
     private fun buildObj(mesh: Mesh, name: String): String = buildString {
-        appendLine("# Exported by Trellis Studio")
+        appendLine("# Exported by VOID")
         appendLine("# $name — ${mesh.vertexCount} vertices, ${mesh.triangleCount} triangles")
         appendLine("mtllib $name.mtl")
         appendLine("o $name")
@@ -176,7 +176,7 @@ object ModelExporter {
     }
 
     private fun buildMtl(name: String, hasTexture: Boolean): String = buildString {
-        appendLine("# Exported by Trellis Studio")
+        appendLine("# Exported by VOID")
         appendLine("newmtl material0")
         appendLine("Ka 1.000 1.000 1.000")
         appendLine("Kd 1.000 1.000 1.000")
@@ -225,7 +225,7 @@ object ModelExporter {
     private fun buildPly(mesh: Mesh): String = buildString {
         appendLine("ply")
         appendLine("format ascii 1.0")
-        appendLine("comment Exported by Trellis Studio")
+        appendLine("comment Exported by VOID")
         appendLine("element vertex ${mesh.vertexCount}")
         appendLine("property float x")
         appendLine("property float y")

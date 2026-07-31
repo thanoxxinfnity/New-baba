@@ -141,7 +141,7 @@ private fun BrandHeader() {
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "T",
+                        "V",
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
@@ -150,7 +150,7 @@ private fun BrandHeader() {
                 Spacer(Modifier.width(11.dp))
                 Column {
                     Text(
-                        "TRELLIS",
+                        "VOID",
                         style = MaterialTheme.typography.titleLarge.copy(
                             brush = NeonBrush,
                             fontWeight = FontWeight.Bold,
@@ -158,8 +158,8 @@ private fun BrandHeader() {
                         ),
                     )
                     Text(
-                        "STUDIO",
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 5.sp),
+                        "AI ENGINE",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 3.sp),
                         color = TextSecondary,
                     )
                 }

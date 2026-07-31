@@ -54,7 +54,7 @@ class TrellisClient(private val context: Context) {
         const val STATUS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
         // Failures are a capacity coin-flip; a generous attempt count costs
         // little now that each attempt aborts at 45s instead of 90s.
-        const val MAX_ATTEMPTS = 8
+        const val MAX_ATTEMPTS = 20
     }
 
     /**
@@ -62,9 +62,17 @@ class TrellisClient(private val context: Context) {
      * real textured GLB. Any extra field (seed, mode, …) makes the service 500,
      * so the body deliberately carries nothing else.
      */
+    /** Mesh density preference, applied by steering the prompt. */
+    enum class Detail(val label: String, val hint: String) {
+        LOW("Low poly", "low poly, simplified geometry, flat shaded, game asset"),
+        STANDARD("Standard", ""),
+        HIGH("High detail", "highly detailed, intricate surface detail, high resolution mesh"),
+    }
+
     suspend fun generateFromText(
         apiKey: String,
         prompt: String,
+        detail: Detail = Detail.STANDARD,
         onAttempt: suspend (attempt: Int, total: Int) -> Unit = { _, _ -> },
     ): Result<String> =
         withContext(Dispatchers.IO) {
@@ -74,7 +82,12 @@ class TrellisClient(private val context: Context) {
             if (prompt.isBlank()) {
                 return@withContext Result.failure(Exception("Describe what to build first."))
             }
-            val body = buildJsonObject { put("prompt", prompt.trim()) }.toString()
+            // TRELLIS takes only "prompt" — any extra field makes it 500 — so the
+            // detail preference is folded into the prompt text itself.
+            val styled = listOf(prompt.trim(), detail.hint)
+                .filter { it.isNotBlank() }
+                .joinToString(", ")
+            val body = buildJsonObject { put("prompt", styled) }.toString()
             // The endpoint cold-starts and 500s for the first call fairly often,
             // so a couple of retries is the difference between working and not.
             // Measured: the service 500s on roughly half of first attempts but
@@ -93,8 +106,8 @@ class TrellisClient(private val context: Context) {
             }
             Result.failure(
                 Exception(
-                    "NVIDIA's 3D service refused $MAX_ATTEMPTS times in a row — it's overloaded " +
-                        "right now, not a problem with your prompt. Try again shortly."
+                    "NVIDIA's 3D service refused all $MAX_ATTEMPTS attempts — it's badly " +
+                        "overloaded right now. Your prompt is fine; try again in a few minutes."
                 )
             )
         }

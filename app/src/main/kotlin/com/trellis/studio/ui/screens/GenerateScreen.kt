@@ -29,6 +29,7 @@ import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.ImageUtils
 import kotlinx.coroutines.launch
+import com.trellis.studio.network.TrellisClient
 import com.trellis.studio.viewmodel.ModelJob
 import com.trellis.studio.viewmodel.GenerateViewModel
 import java.io.File
@@ -290,6 +291,27 @@ private fun ThreeDGenerateTab(
             shape = RoundedCornerShape(14.dp),
             maxLines = 6,
         )
+        // Mesh density
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TrellisClient.Detail.entries.forEach { d ->
+                FilterChip(
+                    selected = state.detail == d,
+                    onClick = { vm.setDetail(d) },
+                    label = { Text(d.label, style = MaterialTheme.typography.labelMedium) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Purple40,
+                        selectedLabelColor = TextPrimary,
+                        containerColor = CardDark,
+                        labelColor = TextSecondary,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
         val queued = state.text3dPrompt.split("\n").count { it.isBlank().not() }
         Button(
             onClick = vm::generate3dFromText,

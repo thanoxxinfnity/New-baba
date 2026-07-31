@@ -29,6 +29,7 @@ data class GenerateUiState(
     val isGenerating3d: Boolean = false,
     val generatedModelPath: String? = null,
     val text3dPrompt: String = "",
+    val detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD,
     // shared
     val error: String? = null,
     val statusMessage: String? = null,
@@ -141,6 +142,7 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setTextTo3dPrompt(v: String) = _state.update { it.copy(text3dPrompt = v) }
+    fun setDetail(d: TrellisClient.Detail) = _state.update { it.copy(detail = d) }
 
     /**
      * Queues one job per line, so several models can be asked for at once.
@@ -153,7 +155,7 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(error = "Describe the object you want.") }
             return
         }
-        queue.enqueue(prompts)
+        queue.enqueue(prompts, _state.value.detail)
         _state.update { it.copy(text3dPrompt = "", error = null) }
     }
 

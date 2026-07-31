@@ -38,7 +38,7 @@ fun MessageBubble(
             Box(
                 Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(Purple40),
                 contentAlignment = Alignment.Center,
-            ) { Text("T", style = MaterialTheme.typography.labelMedium, color = Color.White) }
+            ) { Text("V", style = MaterialTheme.typography.labelMedium, color = Color.White) }
             Spacer(Modifier.width(8.dp))
         }
         Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
@@ -105,7 +105,7 @@ fun MessageBubble(
 fun TypingIndicator() {
     Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(Purple40), contentAlignment = Alignment.Center) {
-            Text("T", style = MaterialTheme.typography.labelMedium, color = Color.White)
+            Text("V", style = MaterialTheme.typography.labelMedium, color = Color.White)
         }
         Spacer(Modifier.width(8.dp))
         Box(

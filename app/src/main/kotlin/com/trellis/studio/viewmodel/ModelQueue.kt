@@ -5,6 +5,7 @@ import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.TrellisClient
+import com.trellis.studio.service.GenerationService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 data class ModelJob(
     val id: Long,
     val prompt: String,
+    val detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD,
     val status: Status = Status.QUEUED,
     val attempt: Int = 0,
     val totalAttempts: Int = 0,
@@ -47,6 +49,8 @@ data class ModelJob(
  */
 class ModelQueue private constructor(app: Application) {
 
+    private val appContext = app
+
     private val prefs = AppPrefs(app)
     private val db = AppDatabase.get(app)
     private val client = TrellisClient(app)
@@ -61,12 +65,15 @@ class ModelQueue private constructor(app: Application) {
     private var nextId = 1L
 
     /** Adds prompts to the queue. Blank lines are ignored, duplicates allowed. */
-    fun enqueue(prompts: List<String>) {
+    fun enqueue(prompts: List<String>, detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD) {
         val clean = prompts.map { it.trim() }.filter { it.isNotBlank() }
         if (clean.isEmpty()) return
         _jobs.update { current ->
-            current + clean.map { ModelJob(id = nextId++, prompt = it) }
+            current + clean.map { ModelJob(id = nextId++, prompt = it, detail = detail) }
         }
+        // A foreground service is what keeps this running once the app is
+        // backgrounded or swiped away.
+        GenerationService.start(appContext)
         start()
     }
 
@@ -87,6 +94,7 @@ class ModelQueue private constructor(app: Application) {
         _jobs.update { list ->
             list.map { if (it.id == id) it.copy(status = ModelJob.Status.QUEUED, error = null) else it }
         }
+        GenerationService.start(appContext)
         start()
     }
 
@@ -112,6 +120,7 @@ class ModelQueue private constructor(app: Application) {
                 client.generateFromText(
                     apiKey = apiKey,
                     prompt = job.prompt,
+                    detail = job.detail,
                     onAttempt = { attempt, total ->
                         update(job.id) { it.copy(attempt = attempt, totalAttempts = total) }
                     },

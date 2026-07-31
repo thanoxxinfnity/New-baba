@@ -174,7 +174,7 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall, color = TextSecondary,
                 )
                 Text(
-                    "Trellis Studio v2.0 — Powered by NVIDIA NIM, Jetpack Compose, SceneView",
+                    "VOID v2.0 — NVIDIA NIM · Jetpack Compose · SceneView",
                     style = MaterialTheme.typography.bodySmall, color = TextDisabled,
                 )
             }

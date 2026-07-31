@@ -207,7 +207,7 @@ fun NeuralTypingIndicator() {
                 .background(Brush.linearGradient(listOf(Purple40, Cyan.copy(alpha = 0.6f)))),
             contentAlignment = Alignment.Center,
         ) {
-            Text("T", style = MaterialTheme.typography.labelMedium, color = Color.White)
+            Text("V", style = MaterialTheme.typography.labelMedium, color = Color.White)
         }
         Spacer(Modifier.width(8.dp))
         Row(
