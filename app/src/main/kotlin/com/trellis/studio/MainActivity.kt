@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -15,6 +17,8 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -24,8 +28,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.trellis.studio.ui.components.AppDrawer
+import com.trellis.studio.ui.components.DrawerEntry
 import com.trellis.studio.ui.screens.*
 import com.trellis.studio.ui.theme.*
+import kotlinx.coroutines.launch
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -45,13 +52,26 @@ sealed class NavRoute(
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
-/** Bottom bar holds the five primary destinations; the rest live in Gallery/Settings. */
+/** Bottom bar keeps the four most-used screens; the drawer holds everything. */
 val bottomNavItems = listOf(
     NavRoute.Chat,
     NavRoute.Generate,
     NavRoute.Terminal,
-    NavRoute.Browser,
     NavRoute.Artifacts,
+)
+
+/** Every destination, grouped, for the side drawer. */
+val drawerEntries = listOf(
+    DrawerEntry("chat", "Chat", Icons.AutoMirrored.Filled.Chat, "Talk, code, generate images", "Workspace"),
+    DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
+    DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
+    DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "Offline text-to-speech", "Workspace"),
+
+    DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
+    DrawerEntry("artifacts", "Builds", Icons.Filled.Android, "APKs, files and build logs", "Developer"),
+    DrawerEntry("browser", "Browser", Icons.Filled.Public, "Real Google search", "Developer"),
+
+    DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
 )
 
 const val ROUTE_VIEWER = "viewer"
@@ -73,91 +93,133 @@ fun MainContent() {
     val navController: NavHostController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
-    // The 3D viewer is full-screen: no bottom bar behind it.
-    val showBottomBar = currentRoute?.startsWith(ROUTE_VIEWER) != true
+    // The 3D viewer is full-screen: no chrome behind it.
+    val immersive = currentRoute?.startsWith(ROUTE_VIEWER) == true
 
-    Scaffold(
-        // imePadding is required: enableEdgeToEdge() stops the window from resizing,
-        // so without it the soft keyboard covers the chat input box.
-        modifier = Modifier.fillMaxSize().imePadding(),
-        containerColor = BgDark,
-        bottomBar = {
-            if (showBottomBar) {
-                NavigationBar(containerColor = SurfDark, tonalElevation = 0.dp) {
-                    bottomNavItems.forEach { item ->
-                        val selected = currentRoute == item.route
-                        NavigationBarItem(
-                            icon = {
-                                Icon(
-                                    if (selected) item.selectedIcon else item.icon,
-                                    contentDescription = item.label,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            },
-                            label = {
-                                Text(item.label, style = MaterialTheme.typography.labelSmall)
-                            },
-                            selected = selected,
-                            alwaysShowLabel = false,
-                            onClick = {
-                                if (currentRoute != item.route) {
-                                    navController.navigate(item.route) {
-                                        popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                }
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = TextPrimary,
-                                selectedTextColor = Purple60,
-                                unselectedIconColor = TextDisabled,
-                                unselectedTextColor = TextDisabled,
-                                indicatorColor = Purple40.copy(alpha = 0.30f),
+    val openDrawer: () -> Unit = { scope.launch { drawerState.open() } }
+
+    fun go(route: String) {
+        scope.launch { drawerState.close() }
+        if (currentRoute != route) {
+            navController.navigate(route) {
+                popUpTo(navController.graph.startDestinationId) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = !immersive,
+        scrimColor = Color.Black.copy(alpha = 0.6f),
+        drawerContent = {
+            AppDrawer(
+                entries = drawerEntries,
+                currentRoute = currentRoute,
+                onSelect = ::go,
+            )
+        },
+    ) {
+        Scaffold(
+            // imePadding is required: enableEdgeToEdge() stops the window from resizing,
+            // so without it the soft keyboard covers the chat input box.
+            modifier = Modifier.fillMaxSize().imePadding(),
+            containerColor = Color.Transparent,
+            bottomBar = {
+                if (!immersive) {
+                    NavigationBar(
+                        containerColor = SurfDark.copy(alpha = 0.96f),
+                        tonalElevation = 0.dp,
+                    ) {
+                        bottomNavItems.forEach { item ->
+                            val selected = currentRoute == item.route
+                            NavigationBarItem(
+                                icon = {
+                                    Icon(
+                                        if (selected) item.selectedIcon else item.icon,
+                                        contentDescription = item.label,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                },
+                                label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
+                                selected = selected,
+                                alwaysShowLabel = false,
+                                onClick = { go(item.route) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Cyan,
+                                    selectedTextColor = Cyan,
+                                    unselectedIconColor = TextDisabled,
+                                    unselectedTextColor = TextDisabled,
+                                    indicatorColor = Purple40.copy(alpha = 0.32f),
+                                ),
+                            )
+                        }
+                    }
+                }
+            },
+        ) { innerPadding ->
+            // Ambient glow behind every screen, so surfaces read as glass.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(BgDark)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Purple40.copy(alpha = 0.16f),
+                                Cyan.copy(alpha = 0.05f),
+                                Color.Transparent,
                             ),
+                            radius = 1500f,
+                        )
+                    )
+            ) {
+                NavHost(
+                    navController = navController,
+                    startDestination = NavRoute.Chat.route,
+                    modifier = Modifier.padding(innerPadding),
+                ) {
+                    composable(NavRoute.Chat.route) { ChatScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Generate.route) {
+                        GenerateScreen(
+                            onMenu = openDrawer,
+                            onOpenModel = { path, name -> navController.openViewer(path, name) },
+                        )
+                    }
+                    composable(NavRoute.Terminal.route) { TerminalScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Browser.route) { BrowserScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Gallery.route) {
+                        GalleryScreen(
+                            onMenu = openDrawer,
+                            onOpenModel = { path, name -> navController.openViewer(path, name) },
+                            onOpenVoice = { go("voice") },
+                            onOpenSettings = { go("settings") },
+                        )
+                    }
+                    composable(NavRoute.Artifacts.route) { ArtifactsScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Voice.route) { VoiceScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
+
+                    composable(
+                        route = "$ROUTE_VIEWER/{path}/{name}",
+                        arguments = listOf(
+                            navArgument("path") { type = NavType.StringType },
+                            navArgument("name") { type = NavType.StringType },
+                        ),
+                    ) { entry ->
+                        val path = entry.arguments?.getString("path").orEmpty().decodeArg()
+                        val name = entry.arguments?.getString("name").orEmpty().decodeArg()
+                        ModelViewerScreen(
+                            modelPath = path,
+                            modelName = name.ifBlank { "3D Model" },
+                            onBack = { navController.popBackStack() },
                         )
                     }
                 }
-            }
-        },
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = NavRoute.Chat.route,
-            modifier = Modifier.padding(innerPadding),
-        ) {
-            composable(NavRoute.Chat.route) { ChatScreen() }
-            composable(NavRoute.Generate.route) {
-                GenerateScreen(onOpenModel = { path, name -> navController.openViewer(path, name) })
-            }
-            composable(NavRoute.Terminal.route) { TerminalScreen() }
-            composable(NavRoute.Browser.route) { BrowserScreen() }
-            composable(NavRoute.Gallery.route) {
-                GalleryScreen(
-                    onOpenModel = { path, name -> navController.openViewer(path, name) },
-                    onOpenVoice = { navController.navigate(NavRoute.Voice.route) },
-                    onOpenSettings = { navController.navigate(NavRoute.Settings.route) },
-                )
-            }
-            composable(NavRoute.Artifacts.route) { ArtifactsScreen() }
-            composable(NavRoute.Voice.route) { VoiceScreen() }
-            composable(NavRoute.Settings.route) { SettingsScreen() }
-
-            composable(
-                route = "$ROUTE_VIEWER/{path}/{name}",
-                arguments = listOf(
-                    navArgument("path") { type = NavType.StringType },
-                    navArgument("name") { type = NavType.StringType },
-                ),
-            ) { entry ->
-                val path = entry.arguments?.getString("path").orEmpty().decodeArg()
-                val name = entry.arguments?.getString("name").orEmpty().decodeArg()
-                ModelViewerScreen(
-                    modelPath = path,
-                    modelName = name.ifBlank { "3D Model" },
-                    onBack = { navController.popBackStack() },
-                )
             }
         }
     }

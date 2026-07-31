@@ -26,6 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.trellis.studio.ui.components.copyToClipboard
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 
 private const val HOME = "https://www.google.com"
@@ -34,7 +35,7 @@ private const val HOME = "https://www.google.com"
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun BrowserScreen() {
+fun BrowserScreen(onMenu: () -> Unit = {}) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
 
@@ -72,6 +73,7 @@ fun BrowserScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    MenuButton(onMenu, Modifier.size(36.dp))
                     IconButton(
                         onClick = { webView?.goBack() },
                         enabled = canGoBack,

@@ -28,6 +28,7 @@ import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.TtydClient
 import com.trellis.studio.terminal.ShellSession
 import com.trellis.studio.ui.components.copyToClipboard
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
 import kotlinx.coroutines.flow.first
@@ -37,7 +38,7 @@ private data class TermLine(val prompt: String?, val text: String, val exitCode:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TerminalScreen() {
+fun TerminalScreen(onMenu: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val shell = remember { ShellSession(context) }
@@ -104,6 +105,7 @@ fun TerminalScreen() {
         containerColor = TermBg,
         topBar = {
             TopAppBar(
+                navigationIcon = { MenuButton(onMenu) },
                 title = {
                     Column {
                         Text("Terminal", style = MaterialTheme.typography.titleMedium, color = TextPrimary)

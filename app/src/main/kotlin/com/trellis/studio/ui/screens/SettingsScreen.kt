@@ -16,11 +16,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.viewmodel.SettingsViewModel
 
 @Composable
-fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
+fun SettingsScreen(
+    vm: SettingsViewModel = viewModel(),
+    onMenu: () -> Unit = {},
+) {
     val nvidiaKey by vm.nvidiaKey.collectAsStateWithLifecycle()
     val buildServerUrl by vm.buildServerUrl.collectAsStateWithLifecycle()
     val hinglish by vm.hinglishThinking.collectAsStateWithLifecycle()
@@ -32,8 +36,13 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         Surface(color = SurfDark) {
-            Text("Settings", style = MaterialTheme.typography.titleLarge, color = TextPrimary,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MenuButton(onMenu)
+                Text("Settings", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+            }
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
 

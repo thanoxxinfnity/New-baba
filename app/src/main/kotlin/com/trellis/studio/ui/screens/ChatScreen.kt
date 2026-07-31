@@ -32,7 +32,10 @@ import java.io.InputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(vm: ChatViewModel = viewModel()) {
+fun ChatScreen(
+    vm: ChatViewModel = viewModel(),
+    onMenu: () -> Unit = {},
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -63,6 +66,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     Column(Modifier.fillMaxSize().background(BgDark)) {
         // Top bar
         TopAppBar(
+            navigationIcon = { MenuButton(onMenu) },
             title = {
                 Column {
                     Text("Chat", style = MaterialTheme.typography.titleMedium, color = TextPrimary)

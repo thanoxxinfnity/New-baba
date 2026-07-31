@@ -18,12 +18,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.trellis.studio.data.entity.GenerationEntity
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.viewmodel.GalleryViewModel
 
 @Composable
 fun GalleryScreen(
     vm: GalleryViewModel = viewModel(),
+    onMenu: () -> Unit = {},
     onOpenModel: (path: String, name: String) -> Unit = { _, _ -> },
     onOpenVoice: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
@@ -36,9 +38,10 @@ fun GalleryScreen(
         Surface(color = SurfDark) {
             Column {
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+                    Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    MenuButton(onMenu)
                     Text(
                         "Gallery",
                         style = MaterialTheme.typography.titleLarge,

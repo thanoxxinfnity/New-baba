@@ -25,6 +25,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.trellis.studio.data.model.NIM_IMAGE_MODELS
 import com.trellis.studio.ui.components.*
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.viewmodel.GenerateViewModel
 import java.io.File
@@ -32,6 +33,7 @@ import java.io.File
 @Composable
 fun GenerateScreen(
     vm: GenerateViewModel = viewModel(),
+    onMenu: () -> Unit = {},
     onOpenModel: (path: String, name: String) -> Unit = { _, _ -> },
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -42,10 +44,17 @@ fun GenerateScreen(
         // Header
         Surface(color = SurfDark) {
             Column {
-                Text(
-                    "Generate", style = MaterialTheme.typography.titleLarge, color = TextPrimary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                )
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MenuButton(onMenu)
+                    Text(
+                        "Create",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextPrimary,
+                    )
+                }
                 TabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = SurfDark,

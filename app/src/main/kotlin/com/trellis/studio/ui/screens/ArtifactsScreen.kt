@@ -20,6 +20,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.data.model.RemoteArtifact
 import com.trellis.studio.ui.components.copyToClipboard
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
 import com.trellis.studio.viewmodel.BuildViewModel
@@ -32,7 +33,10 @@ import java.io.File
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ArtifactsScreen(vm: BuildViewModel = viewModel()) {
+fun ArtifactsScreen(
+    vm: BuildViewModel = viewModel(),
+    onMenu: () -> Unit = {},
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -50,9 +54,10 @@ fun ArtifactsScreen(vm: BuildViewModel = viewModel()) {
             Surface(color = SurfDark) {
                 Column {
                     Row(
-                        Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
+                        Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        MenuButton(onMenu)
                         Text(
                             "Artifacts",
                             style = MaterialTheme.typography.titleLarge.copy(brush = NeonBrush),

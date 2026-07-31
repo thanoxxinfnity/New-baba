@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.trellis.studio.network.TtsClient
+import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -34,7 +35,7 @@ private val PRESETS = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun VoiceScreen() {
+fun VoiceScreen(onMenu: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val ttsClient = remember { TtsClient(context) }
@@ -64,12 +65,17 @@ fun VoiceScreen() {
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         Surface(color = SurfDark) {
-            Text(
-                "Voice / TTS",
-                style = MaterialTheme.typography.titleLarge,
-                color = TextPrimary,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MenuButton(onMenu)
+                Text(
+                    "Voice / TTS",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = TextPrimary,
+                )
+            }
         }
 
         Column(
