@@ -6,10 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.ChatMessageEntity
 import com.trellis.studio.data.entity.ChatSessionEntity
+import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.data.model.ChatTurn
 import com.trellis.studio.data.model.LlmModel
+import com.trellis.studio.data.model.NIM_IMAGE_MODELS
 import com.trellis.studio.data.model.NIM_LLM_MODELS
 import com.trellis.studio.data.prefs.AppPrefs
+import com.trellis.studio.network.ImageGenClient
 import com.trellis.studio.network.NimClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -32,6 +35,11 @@ data class ChatUiState(
     val isThinking: Boolean = false,
     /** Seconds the model spent thinking, shown on the collapsed bubble. */
     val thoughtSeconds: Int = 0,
+
+    /** When on, the next message generates an image instead of text. */
+    val imageMode: Boolean = false,
+    /** Transient progress note, e.g. "Generating image…". */
+    val statusMessage: String? = null,
 ) {
     /** True once the reply has started but nothing has been persisted yet. */
     val isStreaming: Boolean
@@ -42,6 +50,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db   = AppDatabase.get(app)
     private val prefs= AppPrefs(app)
     private val nim  = NimClient()
+    private val imageClient = ImageGenClient(app)
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -101,6 +110,64 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() = _state.update { it.copy(error = null) }
 
+    /** Toggles "draw this" mode, where the next message generates an image. */
+    fun setImageMode(on: Boolean) = _state.update { it.copy(imageMode = on) }
+
+    /**
+     * Phrases that mean "make me a picture". Used to auto-route a message to
+     * image generation the way Gemini does, without needing a command.
+     */
+    private fun looksLikeImageRequest(text: String): Boolean {
+        val t = text.lowercase().trim()
+        if (t.startsWith("/image") || t.startsWith("/img") || t.startsWith("/draw")) return true
+        val verbs = listOf("draw", "generate an image", "generate image", "create an image",
+            "make an image", "picture of", "image of", "photo of", "paint", "illustrate",
+            "banao", "bana do", "photo bana", "image bana")
+        return verbs.any { t.startsWith(it) || t.contains(it) }
+    }
+
+    /** Strips the leading command so the prompt reads naturally. */
+    private fun cleanImagePrompt(text: String): String =
+        text.trim().removePrefix("/image").removePrefix("/img").removePrefix("/draw").trim()
+            .ifBlank { text.trim() }
+
+    /**
+     * Generates an image and stores it on an assistant message, so it renders
+     * inline in the conversation.
+     */
+    private suspend fun generateImageReply(sessionId: Long, prompt: String) {
+        _state.update { it.copy(statusMessage = "Generating image…") }
+        val apiKey = prefs.pollKey.first()
+        val modelId = prefs.selectedImg.first()
+        val model = NIM_IMAGE_MODELS.find { it.id == modelId } ?: NIM_IMAGE_MODELS.first()
+
+        imageClient.generateImage(
+            apiKey = apiKey,
+            model = model,
+            prompt = prompt,
+            width = 1024,
+            height = 1024,
+            seed = System.currentTimeMillis() % 100000,
+        ).onSuccess { path ->
+            db.chatDao().insertMessage(
+                ChatMessageEntity(
+                    sessionId = sessionId,
+                    role = "assistant",
+                    content = "Here's \"$prompt\".",
+                    imagePath = path,
+                )
+            )
+            db.generationDao().insert(
+                GenerationEntity(type = "image", prompt = prompt, imagePath = path)
+            )
+            _state.update { it.copy(isLoading = false, statusMessage = null, error = null) }
+        }.onFailure { e ->
+            _state.update {
+                it.copy(isLoading = false, statusMessage = null, error = e.message ?: "Image generation failed")
+            }
+        }
+    }
+
     /**
      * Send a user message, optionally with an image (vision models only).
      */
@@ -147,6 +214,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 )
 
+                // Image request? Generate a picture and render it in the thread.
+                if (_state.value.imageMode || looksLikeImageRequest(text)) {
+                    generateImageReply(sessionId, cleanImagePrompt(text))
+                    return@launch
+                }
+
                 val sysPrompt = prefs.systemPrompt.first()
                 val requestedMax = prefs.maxTokens.first()
                 val temp = prefs.temperature.first().toDouble()
@@ -156,10 +229,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val windowTokens = (model?.contextK ?: 128) * 1024
                 val maxTok = requestedMax.coerceAtMost(windowTokens / 2).coerceAtLeast(64)
 
+                val hinglish = prefs.hinglishThinking.first()
+                val effectivePrompt =
+                    if (hinglish) sysPrompt + AppPrefs.HINGLISH_SUFFIX else sysPrompt
+
                 val history = db.chatDao().getMessages(sessionId).first()
                 val turns = buildTurns(
                     history = history,
-                    systemPrompt = sysPrompt,
+                    systemPrompt = effectivePrompt,
                     windowTokens = windowTokens,
                     reservedTokens = maxTok,
                     visionCapable = visionCapable,

@@ -24,10 +24,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trellis.studio.terminal.ShellResult
+import com.trellis.studio.data.prefs.AppPrefs
+import com.trellis.studio.network.TtydClient
 import com.trellis.studio.terminal.ShellSession
 import com.trellis.studio.ui.components.copyToClipboard
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private data class TermLine(val prompt: String?, val text: String, val exitCode: Int = 0)
@@ -38,6 +41,12 @@ fun TerminalScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val shell = remember { ShellSession(context) }
+    val ttyd = remember { TtydClient() }
+    val prefs = remember { AppPrefs(context) }
+    // Remote mode sends commands to the user's own machine over ttyd.
+    var remoteMode by remember { mutableStateOf(false) }
+    var remoteUrl by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { remoteUrl = prefs.buildServerUrl.first() }
     val listState = rememberLazyListState()
     val snackbar = remember { SnackbarHostState() }
 
@@ -67,10 +76,24 @@ fun TerminalScreen() {
         val shownPrompt = shell.prompt()
         scope.launch {
             running = true
-            history += TermLine(shownPrompt, cmd)
-            val result: ShellResult = shell.run(cmd)
-            if (result.output.isNotBlank()) {
-                history += TermLine(null, result.output, result.exitCode)
+            history += TermLine(if (remoteMode) "remote" else shownPrompt, cmd)
+            if (remoteMode) {
+                if (remoteUrl.isBlank()) {
+                    history += TermLine(null, "No terminal URL set. Add it in Settings.", 1)
+                } else {
+                    ttyd.run(remoteUrl, cmd, timeoutMs = 600_000)
+                        .onSuccess { out ->
+                            if (out.isNotBlank()) history += TermLine(null, out, 0)
+                        }
+                        .onFailure { e ->
+                            history += TermLine(null, e.message ?: "Remote command failed", 1)
+                        }
+                }
+            } else {
+                val result: ShellResult = shell.run(cmd)
+                if (result.output.isNotBlank()) {
+                    history += TermLine(null, result.output, result.exitCode)
+                }
             }
             running = false
         }
@@ -85,15 +108,45 @@ fun TerminalScreen() {
                     Column {
                         Text("Terminal", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                         Text(
-                            shell.prompt(),
+                            if (remoteMode) "remote · your machine" else shell.prompt(),
                             style = MaterialTheme.typography.bodySmall,
-                            color = TermGreen,
+                            color = if (remoteMode) Cyan else TermGreen,
                             fontFamily = FontFamily.Monospace,
                             maxLines = 1,
                         )
                     }
                 },
                 actions = {
+                    // Local sandbox <-> the user's own machine over ttyd
+                    FilterChip(
+                        selected = remoteMode,
+                        onClick = {
+                            remoteMode = !remoteMode
+                            history += TermLine(
+                                null,
+                                if (remoteMode)
+                                    "Switched to REMOTE — commands run on your machine via ttyd."
+                                else "Switched to LOCAL — commands run in the app sandbox.",
+                            )
+                        },
+                        label = {
+                            Text(if (remoteMode) "Remote" else "Local", fontSize = 11.sp)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (remoteMode) Icons.Default.Cloud else Icons.Default.PhoneAndroid,
+                                null, modifier = Modifier.size(14.dp),
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Cyan.copy(alpha = 0.25f),
+                            selectedLabelColor = Cyan,
+                            selectedLeadingIconColor = Cyan,
+                            containerColor = CardDark,
+                            labelColor = TextSecondary,
+                        ),
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
                     IconButton(onClick = {
                         val text = history.joinToString("\n") {
                             if (it.prompt != null) "${it.prompt} $ ${it.text}" else it.text

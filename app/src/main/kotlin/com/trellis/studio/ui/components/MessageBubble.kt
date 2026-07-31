@@ -42,15 +42,18 @@ fun MessageBubble(
             Spacer(Modifier.width(8.dp))
         }
         Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-            // Attached image (user only)
-            if (isUser && imagePath != null) {
+            // Images render inline for both sides: the user's attachment and
+            // any picture the assistant generated.
+            if (imagePath != null) {
                 AsyncImage(
                     model = imagePath,
-                    contentDescription = "Image",
-                    modifier = Modifier.size(150.dp).clip(RoundedCornerShape(12.dp)),
+                    contentDescription = if (isUser) "Attached image" else "Generated image",
+                    modifier = Modifier
+                        .then(if (isUser) Modifier.size(150.dp) else Modifier.size(260.dp))
+                        .clip(RoundedCornerShape(16.dp)),
                     contentScale = ContentScale.Crop,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
             }
             // Reasoning block — collapsed "Thought for …" chip, tap to expand.
             if (!isUser && !reasoning.isNullOrBlank()) {

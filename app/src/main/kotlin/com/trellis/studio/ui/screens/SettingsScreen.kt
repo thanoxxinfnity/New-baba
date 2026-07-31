@@ -22,6 +22,8 @@ import com.trellis.studio.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
     val nvidiaKey by vm.nvidiaKey.collectAsStateWithLifecycle()
+    val buildServerUrl by vm.buildServerUrl.collectAsStateWithLifecycle()
+    val hinglish by vm.hinglishThinking.collectAsStateWithLifecycle()
     val falKey by vm.falKey.collectAsStateWithLifecycle()
     val pollKey by vm.pollKey.collectAsStateWithLifecycle()
     val systemPrompt by vm.systemPrompt.collectAsStateWithLifecycle()
@@ -58,6 +60,52 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                     description = "Optional — Pollinations FLUX is free without a key.",
                     onSave = vm::setPollKey,
                 )
+            }
+
+            // ---- Build server: the only way to get a real APK ----
+            SettingsSection(title = "Build Server", icon = Icons.Default.Android) {
+                Text(
+                    "Android can't compile an APK on the phone — the OS blocks running " +
+                        "binaries made at runtime, and there's no JDK or SDK on device. " +
+                        "Run tools/trellis_build_server.py on a PC that has the Android " +
+                        "SDK, expose it with \"ngrok http 8000\", and paste the https URL " +
+                        "here. Then the AI can write code, build it, and give you a real .apk.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextDisabled,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+                ApiKeyField(
+                    label = "Build server URL",
+                    value = buildServerUrl,
+                    hint = "https://xxxx.ngrok-free.dev",
+                    description = "Leave empty to disable remote builds.",
+                    onSave = vm::setBuildServerUrl,
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Think in Hinglish",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            "Model reasons and answers in Hinglish, so the thinking bubble is readable.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextDisabled,
+                        )
+                    }
+                    Switch(
+                        checked = hinglish,
+                        onCheckedChange = vm::setHinglishThinking,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Cyan,
+                            checkedTrackColor = Cyan.copy(alpha = 0.35f),
+                        ),
+                    )
+                }
             }
 
             // ---- Chat Settings ----

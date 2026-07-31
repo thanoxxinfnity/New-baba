@@ -57,10 +57,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 
     val currentModel = NIM_LLM_MODELS.find { it.id == state.selectedModel }
 
-    // Drop a staged image if the user switches to a model that cannot see it.
-    LaunchedEffect(currentModel?.isVision) {
-        if (currentModel?.isVision != true) selectedImageUri = null
-    }
+
 
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(BgDark)) {
@@ -204,17 +201,33 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
-                    // Attach image (vision models)
-                    if (currentModel?.isVision == true) {
-                        IconButton(onClick = { imagePicker.launch("image/*") }) {
-                            Icon(Icons.Default.AttachFile, "Attach Image", tint = TextSecondary)
-                        }
+                    // Attach a photo/file — always available. Vision models read
+                    // the image; other models get told one was attached.
+                    IconButton(onClick = { imagePicker.launch("image/*") }) {
+                        Icon(
+                            Icons.Default.AddPhotoAlternate,
+                            "Attach photo",
+                            tint = if (currentModel?.isVision == true) Cyan else TextSecondary,
+                        )
+                    }
+                    // Image generation toggle
+                    IconButton(onClick = { vm.setImageMode(!state.imageMode) }) {
+                        Icon(
+                            Icons.Default.Brush,
+                            "Generate image",
+                            tint = if (state.imageMode) Pink else TextSecondary,
+                        )
                     }
                     // Text input
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it },
-                        placeholder = { Text("Message…", color = TextDisabled) },
+                        placeholder = {
+                            Text(
+                                if (state.imageMode) "Describe the image to generate…" else "Message…",
+                                color = TextDisabled,
+                            )
+                        },
                         modifier = Modifier.weight(1f),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,

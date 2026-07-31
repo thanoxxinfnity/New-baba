@@ -20,6 +20,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val systemPrompt= prefs.systemPrompt.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_SYSTEM)
     val maxTokens   = prefs.maxTokens.stateIn(viewModelScope, SharingStarted.Eagerly, 2048)
     val temperature = prefs.temperature.stateIn(viewModelScope, SharingStarted.Eagerly, 0.7f)
+    val buildServerUrl = prefs.buildServerUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val hinglishThinking = prefs.hinglishThinking.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     fun setNvidiaKey(v: String)    = viewModelScope.launch { prefs.setNvidiaKey(v.trim()) }
     fun setFalKey(v: String)       = viewModelScope.launch { prefs.setFalKey(v.trim()) }
@@ -31,4 +33,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setSystemPrompt(v: String) = viewModelScope.launch { prefs.setSystemPrompt(v) }
     fun setMaxTokens(v: Int)       = viewModelScope.launch { prefs.setMaxTokens(v) }
     fun setTemperature(v: Float)   = viewModelScope.launch { prefs.setTemperature(v) }
+    fun setBuildServerUrl(v: String) = viewModelScope.launch { prefs.setBuildServerUrl(v) }
+    fun setHinglishThinking(v: Boolean) = viewModelScope.launch { prefs.setHinglishThinking(v) }
 }

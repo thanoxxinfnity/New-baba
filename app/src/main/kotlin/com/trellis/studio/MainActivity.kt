@@ -41,6 +41,7 @@ sealed class NavRoute(
     object Browser : NavRoute("browser", "Browser", Icons.Outlined.Public, Icons.Filled.Public)
     object Gallery : NavRoute("gallery", "Gallery", Icons.Outlined.Collections, Icons.Filled.Collections)
     object Voice : NavRoute("voice", "Voice", Icons.Outlined.GraphicEq, Icons.Filled.GraphicEq)
+    object Artifacts : NavRoute("artifacts", "Builds", Icons.Outlined.Android, Icons.Filled.Android)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
@@ -50,7 +51,7 @@ val bottomNavItems = listOf(
     NavRoute.Generate,
     NavRoute.Terminal,
     NavRoute.Browser,
-    NavRoute.Gallery,
+    NavRoute.Artifacts,
 )
 
 const val ROUTE_VIEWER = "viewer"
@@ -139,6 +140,7 @@ fun MainContent() {
                     onOpenSettings = { navController.navigate(NavRoute.Settings.route) },
                 )
             }
+            composable(NavRoute.Artifacts.route) { ArtifactsScreen() }
             composable(NavRoute.Voice.route) { VoiceScreen() }
             composable(NavRoute.Settings.route) { SettingsScreen() }
 

@@ -25,12 +25,20 @@ class AppPrefs(private val context: Context) {
         val KEY_SYSTEM_PROMPT    = stringPreferencesKey("system_prompt")
         val KEY_MAX_TOKENS       = intPreferencesKey("max_tokens")
         val KEY_TEMPERATURE      = floatPreferencesKey("temperature")
+        val KEY_BUILD_SERVER     = stringPreferencesKey("build_server_url")
+        val KEY_BUILD_TOKEN      = stringPreferencesKey("build_server_token")
+        val KEY_HINGLISH         = booleanPreferencesKey("hinglish_thinking")
 
         val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
         val DEFAULT_IMG     = "pollinations/flux"
         val DEFAULT_3D      = "nvidia"
         val DEFAULT_TTS     = "nvidia/magpie-tts-flow"
         val DEFAULT_SYSTEM  = "You are a helpful AI assistant."
+
+        /** Added to the system prompt when Hinglish thinking is on. */
+        val HINGLISH_SUFFIX = " Reply in Hinglish (Hindi written in English letters), " +
+            "and think in Hinglish too so the user can read your reasoning. " +
+            "Keep code and technical terms in English."
     }
 
     private val ds = context.dataStore
@@ -46,6 +54,9 @@ class AppPrefs(private val context: Context) {
     val systemPrompt: Flow<String> = ds.data.catchIO().map { it[KEY_SYSTEM_PROMPT] ?: DEFAULT_SYSTEM }
     val maxTokens: Flow<Int>      = ds.data.catchIO().map { it[KEY_MAX_TOKENS] ?: 2048 }
     val temperature: Flow<Float>  = ds.data.catchIO().map { it[KEY_TEMPERATURE] ?: 0.7f }
+    val buildServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_BUILD_SERVER] ?: "" }
+    val buildServerToken: Flow<String> = ds.data.catchIO().map { it[KEY_BUILD_TOKEN] ?: "" }
+    val hinglishThinking: Flow<Boolean> = ds.data.catchIO().map { it[KEY_HINGLISH] ?: false }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }
@@ -58,6 +69,9 @@ class AppPrefs(private val context: Context) {
     suspend fun setSystemPrompt(v: String)= ds.edit { it[KEY_SYSTEM_PROMPT] = v }
     suspend fun setMaxTokens(v: Int)      = ds.edit { it[KEY_MAX_TOKENS] = v }
     suspend fun setTemperature(v: Float)  = ds.edit { it[KEY_TEMPERATURE] = v }
+    suspend fun setBuildServerUrl(v: String) = ds.edit { it[KEY_BUILD_SERVER] = v.trim() }
+    suspend fun setBuildServerToken(v: String) = ds.edit { it[KEY_BUILD_TOKEN] = v.trim() }
+    suspend fun setHinglishThinking(v: Boolean) = ds.edit { it[KEY_HINGLISH] = v }
 }
 
 private fun Flow<Preferences>.catchIO() = catch { e ->

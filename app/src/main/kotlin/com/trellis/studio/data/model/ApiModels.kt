@@ -141,6 +141,50 @@ data class TrellisStatusResponse(
     @SerialName("output_url") val outputUrl: String? = null,
 )
 
+// ---- Remote build server (tools/trellis_build_server.py) ----
+
+@Serializable
+data class BuildServerHealth(
+    val ok: Boolean = false,
+    val sdk: Boolean = false,
+    val sdkPath: String = "",
+    val java: Boolean = false,
+    val gradle: String = "",
+    val canBuildApk: Boolean = false,
+    val workdir: String = "",
+)
+
+@Serializable
+data class RemoteExecRequest(val cmd: String)
+
+@Serializable
+data class RemoteExecResult(
+    val output: String = "",
+    val exitCode: Int = 0,
+)
+
+@Serializable
+data class RemoteBuildRequest(val files: Map<String, String>)
+
+@Serializable
+data class RemoteBuildStarted(val jobId: String)
+
+@Serializable
+data class RemoteBuildStatus(
+    val state: String = "running",      // running | done | failed
+    val log: String? = null,
+    val artifact: String? = null,
+    val size: Long? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class RemoteArtifact(
+    val name: String,
+    val url: String,
+    val size: Long = 0L,
+)
+
 // ---- TTS Request ----
 @Serializable
 data class TtsRequest(
