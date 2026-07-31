@@ -27,6 +27,7 @@ fun GalleryScreen(
     vm: GalleryViewModel = viewModel(),
     onMenu: () -> Unit = {},
     onOpenModel: (path: String, name: String) -> Unit = { _, _ -> },
+    onOpenImage: (path: String, name: String) -> Unit = { _, _ -> },
     onOpenVoice: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
 ) {
@@ -94,7 +95,9 @@ fun GalleryScreen(
                         onDelete = { vm.delete(it) },
                         onOpen = {
                             if (item.type == "3d") {
-                                item.modelPath?.let { onOpenModel(it, "3D Model") }
+                                item.modelPath?.let { onOpenModel(it, item.prompt ?: "3D Model") }
+                            } else {
+                                item.imagePath?.let { onOpenImage(it, item.prompt ?: "Image") }
                             }
                         },
                     )
@@ -114,7 +117,7 @@ private fun GalleryCard(
         colors = CardDefaults.cardColors(containerColor = CardDark),
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth().aspectRatio(0.85f)
-            .clickable(enabled = item.type == "3d", onClick = onOpen),
+            .clickable(onClick = onOpen),
     ) {
         Box(Modifier.fillMaxSize()) {
             if (item.type == "image" && item.imagePath != null) {

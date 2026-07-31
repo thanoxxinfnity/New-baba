@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.trellis.studio.ui.theme.*
+import com.trellis.studio.util.ModelExporter
+import androidx.compose.foundation.clickable
 import com.trellis.studio.util.FileExport
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.Scene
@@ -55,6 +57,8 @@ fun ModelViewerScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var autoRotate by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf<String?>(null) }
 
     val file = remember(modelPath) { File(modelPath) }
 
@@ -112,6 +116,9 @@ fun ModelViewerScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showExport = true }) {
+                        Icon(Icons.Default.Download, "Export", tint = Cyan)
+                    }
                     IconButton(onClick = { showInfo = !showInfo }) {
                         Icon(Icons.Default.Info, "Info", tint = TextSecondary)
                     }
@@ -206,6 +213,93 @@ fun ModelViewerScreen(
                         Text("Reset", color = TextPrimary)
                     }
                 }
+            }
+        }
+    }
+
+    // ---- Export for game engines -----------------------------------------
+    if (showExport) {
+        ModalBottomSheet(onDismissRequest = { showExport = false }, containerColor = SurfDark) {
+            Column(Modifier.padding(bottom = 28.dp)) {
+                Text(
+                    "Export model",
+                    style = MaterialTheme.typography.titleLarge.copy(brush = NeonBrush),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+                Text(
+                    "Drop these straight into Unity, Unreal, Godot or Blender.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+
+                exporting?.let {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(14.dp), color = Cyan, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(it, color = Cyan, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                ModelExporter.Format.entries.forEach { fmt ->
+                    ListItem(
+                        headlineContent = { Text(fmt.label, color = TextPrimary) },
+                        supportingContent = {
+                            Text(fmt.note, color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+                        },
+                        leadingContent = {
+                            Icon(Icons.Default.InsertDriveFile, null, tint = Purple60, modifier = Modifier.size(20.dp))
+                        },
+                        modifier = Modifier.clickable {
+                            scope.launch {
+                                exporting = "Writing ${fmt.label}…"
+                                ModelExporter.export(file, fmt, FileExport.outputDir(context))
+                                    .onSuccess { out ->
+                                        exporting = null
+                                        showExport = false
+                                        FileExport.share(context, out)
+                                    }
+                                    .onFailure { e ->
+                                        exporting = null
+                                        snackbar.showSnackbar(e.message ?: "Export failed")
+                                    }
+                            }
+                        },
+                        colors = ListItemDefaults.colors(containerColor = SurfDark),
+                    )
+                }
+
+                HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
+                ListItem(
+                    headlineContent = { Text("All formats (.zip)", color = Cyan) },
+                    supportingContent = {
+                        Text("GLB + OBJ + MTL + STL + PLY + texture", color = TextDisabled,
+                            style = MaterialTheme.typography.labelSmall)
+                    },
+                    leadingContent = {
+                        Icon(Icons.Default.FolderZip, null, tint = Cyan, modifier = Modifier.size(20.dp))
+                    },
+                    modifier = Modifier.clickable {
+                        scope.launch {
+                            exporting = "Packing every format…"
+                            ModelExporter.exportAll(file, FileExport.outputDir(context))
+                                .onSuccess { zip ->
+                                    exporting = null
+                                    showExport = false
+                                    FileExport.share(context, zip, "application/zip")
+                                }
+                                .onFailure { e ->
+                                    exporting = null
+                                    snackbar.showSnackbar(e.message ?: "Export failed")
+                                }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = SurfDark),
+                )
             }
         }
     }

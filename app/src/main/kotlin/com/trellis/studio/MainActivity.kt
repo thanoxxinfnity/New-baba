@@ -75,6 +75,7 @@ val drawerEntries = listOf(
 )
 
 const val ROUTE_VIEWER = "viewer"
+const val ROUTE_IMAGE = "image"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,7 +98,8 @@ fun MainContent() {
     val scope = rememberCoroutineScope()
 
     // The 3D viewer is full-screen: no chrome behind it.
-    val immersive = currentRoute?.startsWith(ROUTE_VIEWER) == true
+    val immersive = currentRoute?.startsWith(ROUTE_VIEWER) == true ||
+        currentRoute?.startsWith(ROUTE_IMAGE) == true
 
     val openDrawer: () -> Unit = { scope.launch { drawerState.open() } }
 

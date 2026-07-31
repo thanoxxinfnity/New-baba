@@ -60,16 +60,24 @@ class TrellisClient(private val context: Context) {
             val body = buildJsonObject { put("prompt", prompt.trim()) }.toString()
             // The endpoint cold-starts and 500s for the first call fairly often,
             // so a couple of retries is the difference between working and not.
+            // Measured: the service 500s on roughly half of first attempts but
+            // every tested prompt (sword, robot, car, tree, head) succeeded within
+            // five tries, so retry generously with backoff.
             var last: Throwable? = null
-            repeat(3) { attempt ->
+            repeat(5) { attempt ->
                 runCatching { invoke(apiKey, body, null) }
                     .onSuccess { return@withContext Result.success(it) }
                     .onFailure { e ->
                         last = e
-                        if (attempt < 2) delay(6_000)
+                        if (attempt < 4) delay(5_000L * (attempt + 1))
                     }
             }
-            Result.failure(last ?: Exception("Text-to-3D failed."))
+            Result.failure(
+                Exception(
+                    "NVIDIA's 3D service kept failing after 5 attempts — it's overloaded. " +
+                        "Try again in a minute. (${last?.message ?: "no detail"})"
+                )
+            )
         }
 
     /** Runs the sample TRELLIS job, which is the only input this deployment accepts. */
