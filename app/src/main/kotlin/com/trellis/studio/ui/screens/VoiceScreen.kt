@@ -45,6 +45,13 @@ fun VoiceScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) vm.startRecording() }
 
+    // Upload an existing recording instead of capturing one.
+    val audioPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let(vm::importVoiceSample) }
+
+    var showSourceSheet by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize().background(BgDark)) {
         // ---- Top bar ------------------------------------------------------
         Row(
@@ -232,7 +239,7 @@ fun VoiceScreen(
                     IconButton(
                         onClick = {
                             if (state.isRecording) vm.stopRecording()
-                            else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            else showSourceSheet = true
                         },
                         modifier = Modifier.size(38.dp).clip(CircleShape)
                             .background(if (state.isRecording) Red.copy(alpha = 0.2f) else CardDark),
@@ -294,6 +301,46 @@ fun VoiceScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ---- Record or upload a sample ----------------------------------------
+    if (showSourceSheet) {
+        ModalBottomSheet(onDismissRequest = { showSourceSheet = false }, containerColor = SurfDark) {
+            Column(Modifier.padding(bottom = 28.dp)) {
+                Text(
+                    "Clone a voice",
+                    style = MaterialTheme.typography.titleLarge.copy(brush = NeonBrush),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                )
+                Text(
+                    "Give it 5–20 seconds of clear speech, one speaker, no music.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                ListItem(
+                    headlineContent = { Text("Record with microphone", color = TextPrimary) },
+                    supportingContent = { Text("Speak now", color = TextDisabled) },
+                    leadingContent = { Icon(Icons.Default.Mic, null, tint = Cyan) },
+                    modifier = Modifier.clickable {
+                        showSourceSheet = false
+                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                    colors = ListItemDefaults.colors(containerColor = SurfDark),
+                )
+                ListItem(
+                    headlineContent = { Text("Upload an audio file", color = TextPrimary) },
+                    supportingContent = { Text("mp3, m4a, wav, ogg", color = TextDisabled) },
+                    leadingContent = { Icon(Icons.Default.UploadFile, null, tint = Purple60) },
+                    modifier = Modifier.clickable {
+                        showSourceSheet = false
+                        audioPicker.launch("audio/*")
+                    },
+                    colors = ListItemDefaults.colors(containerColor = SurfDark),
+                )
             }
         }
     }

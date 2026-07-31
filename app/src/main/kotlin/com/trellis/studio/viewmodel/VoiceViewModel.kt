@@ -4,6 +4,8 @@ import android.app.Application
 import android.media.MediaPlayer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.net.Uri
+import com.trellis.studio.audio.AudioConverter
 import com.trellis.studio.audio.VoiceRecorder
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.TtsHistoryEntity
@@ -133,6 +135,26 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
+    /**
+     * Imports an audio file as a voice sample. Anything the platform can decode
+     * works; it is converted to the mono PCM WAV the clone service requires.
+     */
+    fun importVoiceSample(uri: Uri) {
+        viewModelScope.launch {
+            _state.update { it.copy(status = "Reading audio…", error = null) }
+            AudioConverter.toWav(getApplication(), uri)
+                .onSuccess { file ->
+                    val seconds = ((file.length() - 44) / (22050 * 2)).toInt().coerceAtLeast(1)
+                    _state.update {
+                        it.copy(status = null, recordedSample = file.absolutePath, recordSeconds = seconds)
+                    }
+                }
+                .onFailure { e ->
+                    _state.update { it.copy(status = null, error = e.message ?: "Could not read that audio file.") }
+                }
+        }
+    }
+
     fun discardRecording() {
         _state.value.recordedSample?.let { runCatching { File(it).delete() } }
         _state.update { it.copy(recordedSample = null, recordSeconds = 0) }
@@ -156,29 +178,30 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                     text = "Hi, this is $name. This is how I sound.",
                     voiceSample = File(sample),
                 )
-                preview.onSuccess { wav ->
-                    val previewFile = writeAudio(wav, "preview_${System.currentTimeMillis()}.wav")
-                    val id = db.voiceDao().insert(
-                        VoiceEntity(
-                            name = name.ifBlank { "My voice" },
-                            samplePath = sample,
-                            previewPath = previewFile.absolutePath,
-                            isCloned = true,
-                        )
-                    )
-                    _state.update {
-                        it.copy(
-                            isCloning = false,
-                            status = null,
-                            recordedSample = null,
-                            recordSeconds = 0,
-                            selectedVoiceId = id,
-                        )
-                    }
-                    play(previewFile.absolutePath)
-                }.onFailure { e ->
-                    _state.update { it.copy(isCloning = false, status = null, error = e.message) }
+                // Save the voice either way: the sample is the valuable part, and
+                // the preview can be regenerated once the service answers again.
+                val previewPath = preview.getOrNull()?.let {
+                    writeAudio(it, "preview_${System.currentTimeMillis()}.wav").absolutePath
                 }
+                val id = db.voiceDao().insert(
+                    VoiceEntity(
+                        name = name.ifBlank { "My voice" },
+                        samplePath = sample,
+                        previewPath = previewPath,
+                        isCloned = true,
+                    )
+                )
+                _state.update {
+                    it.copy(
+                        isCloning = false,
+                        status = null,
+                        recordedSample = null,
+                        recordSeconds = 0,
+                        selectedVoiceId = id,
+                        error = preview.exceptionOrNull()?.message,
+                    )
+                }
+                previewPath?.let { play(it) }
             } catch (e: Exception) {
                 _state.update { it.copy(isCloning = false, status = null, error = e.message) }
             }

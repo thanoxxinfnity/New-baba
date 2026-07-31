@@ -107,7 +107,7 @@ class NvidiaTtsClient {
             return Result.failure(Exception("Could not read the voice sample: ${it.message}"))
         }
 
-        return call(apiKey, Functions.ZERO_SHOT) { stub ->
+        return call(apiKey, Functions.ZERO_SHOT, timeoutSeconds = CLONE_TIMEOUT_SECONDS) { stub ->
             val zeroShot = ZeroShotData.newBuilder()
                 .setAudioPrompt(ByteString.copyFrom(wav.pcm))
                 .setSampleRateHz(wav.sampleRate)
@@ -131,6 +131,7 @@ class NvidiaTtsClient {
     private suspend fun <T> call(
         apiKey: String,
         functionId: String,
+        timeoutSeconds: Long = TIMEOUT_SECONDS,
         body: (RivaSpeechSynthesisGrpc.RivaSpeechSynthesisBlockingStub) -> T,
     ): Result<T> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
@@ -141,7 +142,7 @@ class NvidiaTtsClient {
             channel = channelFor(apiKey, functionId)
             val intercepted = ClientInterceptors.intercept(channel, interceptor(apiKey, functionId))
             val stub = RivaSpeechSynthesisGrpc.newBlockingStub(intercepted)
-                .withDeadlineAfter(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .withDeadlineAfter(timeoutSeconds, TimeUnit.SECONDS)
             Result.success(body(stub))
         } catch (e: io.grpc.StatusRuntimeException) {
             Result.failure(Exception(describe(e)))
@@ -159,7 +160,8 @@ class NvidiaTtsClient {
             io.grpc.Status.Code.PERMISSION_DENIED ->
                 "NVIDIA API key rejected. Check it in Settings."
             io.grpc.Status.Code.DEADLINE_EXCEEDED ->
-                "NVIDIA's voice service didn't answer in time — it may be starting up. Try again."
+                "NVIDIA's voice-cloning worker accepted the request but didn't return audio. " +
+                    "That's a capacity problem on their side — your sample is saved, try again later."
             io.grpc.Status.Code.UNAVAILABLE ->
                 "NVIDIA's voice service is unavailable right now. Try again shortly."
             io.grpc.Status.Code.RESOURCE_EXHAUSTED ->
@@ -196,7 +198,10 @@ class NvidiaTtsClient {
     private companion object {
         const val HOST = "grpc.nvcf.nvidia.com"
         const val PORT = 443
-        const val TIMEOUT_SECONDS = 240L
+        const val TIMEOUT_SECONDS = 120L
+        // Cloning either answers reasonably fast or not at all; a long wait just
+        // leaves the user staring at a spinner.
+        const val CLONE_TIMEOUT_SECONDS = 100L
         const val DEFAULT_VOICE = "Magpie-Multilingual.EN-US.Sofia"
 
         val FUNCTION_ID_KEY: Metadata.Key<String> =
