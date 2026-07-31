@@ -36,6 +36,8 @@ class NvidiaTtsClient {
     object Functions {
         const val MULTILINGUAL = "877104f7-e885-42b9-8de8-f6e4c6303969"
         const val ZERO_SHOT = "55cf67bf-600f-4b04-8eac-12ed39537a08"
+        /** Chatterbox: 23 languages, one voice each. No cloning in this deployment. */
+        const val CHATTERBOX = "ddacc747-1269-4fab-bfd9-8f593dead106"
     }
 
     private fun channelFor(apiKey: String, functionId: String): ManagedChannel {
@@ -81,6 +83,29 @@ class NvidiaTtsClient {
             .setEncoding(AudioEncoding.LINEAR_PCM)
             .setSampleRateHz(sampleRateHz)
             .setVoiceName(voiceName)
+            .build()
+        wrapWav(stub.synthesize(request).audio.toByteArray(), sampleRateHz)
+    }
+
+    /**
+     * Speaks [text] with Chatterbox, a second multilingual model on the account.
+     *
+     * It covers 23 languages with one voice each and answers in about two
+     * seconds. It is not a cloning model — asking it for a voice sample returns
+     * "Loaded model is not a zero shot model" — so it is offered as its own
+     * engine rather than as a stand-in for a cloned voice.
+     */
+    suspend fun synthesizeChatterbox(
+        apiKey: String,
+        text: String,
+        languageCode: String = "en-US",
+        sampleRateHz: Int = 24000,
+    ): Result<ByteArray> = call(apiKey, Functions.CHATTERBOX) { stub ->
+        val request = SynthesizeSpeechRequest.newBuilder()
+            .setText(text)
+            .setLanguageCode(languageCode)
+            .setEncoding(AudioEncoding.LINEAR_PCM)
+            .setSampleRateHz(sampleRateHz)
             .build()
         wrapWav(stub.synthesize(request).audio.toByteArray(), sampleRateHz)
     }
@@ -180,8 +205,14 @@ class NvidiaTtsClient {
             io.grpc.Status.Code.PERMISSION_DENIED ->
                 "NVIDIA API key rejected. Check it in Settings."
             io.grpc.Status.Code.DEADLINE_EXCEEDED ->
-                "NVIDIA's voice-cloning worker accepted the request but didn't return audio. " +
-                    "That's a capacity problem on their side — your sample is saved, try again later."
+                // Measured against the live service: the zero-shot worker accepts
+                // the call and never answers, for cloning *and* for plain text on
+                // the same function, while the other voice models reply in ~2s.
+                // Nothing about the sample or the request changes it.
+                "NVIDIA's voice-cloning model is down — it accepts the job and never " +
+                    "answers. Your sample is fine and stays saved. The built-in voices " +
+                    "still work; try cloning again later."
+
             io.grpc.Status.Code.UNAVAILABLE ->
                 "NVIDIA's voice service is unavailable right now. Try again shortly."
             io.grpc.Status.Code.RESOURCE_EXHAUSTED ->
@@ -219,9 +250,10 @@ class NvidiaTtsClient {
         const val HOST = "grpc.nvcf.nvidia.com"
         const val PORT = 443
         const val TIMEOUT_SECONDS = 120L
-        // Cloning either answers reasonably fast or not at all; a long wait just
-        // leaves the user staring at a spinner.
-        const val CLONE_TIMEOUT_SECONDS = 100L
+        // Cloning either answers reasonably fast or not at all: a healthy Riva
+        // voice model returns in a couple of seconds, so waiting out a full
+        // minute only buys the user a longer spinner before the same failure.
+        const val CLONE_TIMEOUT_SECONDS = 40L
         // Hard limits reported by the zero-shot model itself.
         const val MIN_PROMPT_SECONDS = 3f
         const val MAX_PROMPT_SECONDS = 9f

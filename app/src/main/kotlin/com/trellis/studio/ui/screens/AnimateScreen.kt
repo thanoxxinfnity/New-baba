@@ -24,6 +24,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.AnimationBaker
+import com.trellis.studio.util.AutoRigger
 import com.trellis.studio.util.FileExport
 import com.trellis.studio.viewmodel.AnimatableModel
 import com.trellis.studio.viewmodel.AnimateViewModel
@@ -139,12 +140,36 @@ fun AnimateScreen(
                 item {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        if (selected == null) "2 · Pick a model above to unlock the clips"
-                        else "2 · Choose a motion clip",
+                        if (selected == null) "2 · Pick a model above to unlock the motion"
+                        else "2 · Choose the motion",
                         style = MaterialTheme.typography.labelLarge,
                         color = if (selected == null) TextDisabled else TextSecondary,
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
+                    SectionHeading(
+                        "Skeleton",
+                        "Builds bones and skin weights, then deforms the mesh — walking, wheels",
+                        enabled = selected != null,
+                    )
+                }
+
+                items(AutoRigger.Rig.entries, key = { "rig_${it.name}" }) { rig ->
+                    val model = selected
+                    RigRow(
+                        rig = rig,
+                        enabled = model != null && busy == null,
+                        suggested = model?.suggestedRig == rig,
+                        onRig = { model?.let { vm.rig(it, rig) } },
+                    )
+                }
+
+                item {
+                    Spacer(Modifier.height(10.dp))
+                    SectionHeading(
+                        "Whole-object clips",
+                        "Moves the model as one piece — no bones, works on anything",
+                        enabled = selected != null,
+                    )
                 }
 
                 items(AnimationBaker.Clip.entries, key = { it.name }) { clip ->
@@ -178,9 +203,17 @@ fun AnimateScreen(
                                     style = MaterialTheme.typography.labelLarge)
                             }
                             Text(
-                                "The clip is written into the file as real glTF animation — not a " +
-                                    "video, not a preview. Unity, Unreal, Godot, Blender and three.js " +
-                                    "play it straight from the .glb, and so does the viewer here.",
+                                "Generated models arrive as one fused shell — no bones, no separate " +
+                                    "parts. \"Skeleton\" builds a rig from the model's own proportions " +
+                                    "and weights every vertex to it, so legs and wheels move on their " +
+                                    "own. \"Whole-object\" moves the model as one piece.",
+                                color = TextSecondary,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                "Either way it is real glTF animation — not a video, not a preview. " +
+                                    "Unity, Unreal, Godot, Blender and three.js play it straight from " +
+                                    "the .glb, and so does the viewer here.",
                                 color = TextSecondary,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -251,6 +284,99 @@ private fun ModelRow(
                 modifier = Modifier.size(20.dp))
         }
     }
+}
+
+@Composable
+private fun SectionHeading(title: String, note: String, enabled: Boolean) {
+    Column(Modifier.padding(start = 4.dp, bottom = 6.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (enabled) Cyan else TextDisabled,
+        )
+        Text(note, style = MaterialTheme.typography.labelSmall, color = TextDisabled)
+    }
+}
+
+@Composable
+private fun RigRow(
+    rig: AutoRigger.Rig,
+    enabled: Boolean,
+    suggested: Boolean,
+    onRig: () -> Unit,
+) {
+    var showCaveat by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (suggested && enabled) Modifier.glass(glow = Pink).neonBorder(RoundedCornerShape(20.dp))
+                else Modifier.glass(fill = if (enabled) GlassFill else GlassFill.copy(alpha = 0.4f))
+            )
+            .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                rigIcon(rig), null,
+                tint = if (enabled) Cyan else TextDisabled,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        rig.label,
+                        color = if (enabled) TextPrimary else TextDisabled,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (suggested) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("best fit", color = Pink, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Text(
+                    rig.note,
+                    color = TextDisabled,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 2,
+                )
+            }
+            IconButton(onClick = { showCaveat = !showCaveat }) {
+                Icon(
+                    Icons.Default.Info, "What this fits",
+                    tint = if (enabled) TextSecondary else TextDisabled,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            FilledTonalButton(
+                onClick = onRig,
+                enabled = enabled,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Purple40),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Rig", color = TextPrimary, style = MaterialTheme.typography.labelLarge)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
+        // The rig is fitted from proportions, not understood, so the limits are
+        // one tap away rather than discovered after a bad result.
+        AnimatedVisibility(visible = showCaveat) {
+            Text(
+                rig.caveat,
+                color = Amber,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 32.dp, end = 12.dp, top = 6.dp),
+            )
+        }
+    }
+}
+
+private fun rigIcon(rig: AutoRigger.Rig) = when (rig) {
+    AutoRigger.Rig.HUMANOID_WALK -> Icons.Default.DirectionsWalk
+    AutoRigger.Rig.HUMANOID_RUN -> Icons.Default.DirectionsRun
+    AutoRigger.Rig.QUADRUPED_WALK -> Icons.Default.Pets
+    AutoRigger.Rig.VEHICLE_WHEELS -> Icons.Default.DirectionsCar
 }
 
 @Composable

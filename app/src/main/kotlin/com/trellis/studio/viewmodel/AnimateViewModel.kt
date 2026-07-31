@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.util.AnimationBaker
+import com.trellis.studio.util.AutoRigger
 import com.trellis.studio.util.FileExport
 import com.trellis.studio.util.ModelExporter
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,8 @@ data class AnimatableModel(
     val path: String,
     val sizeLabel: String,
     val existingClips: List<String>,
+    /** The rig its proportions suggest, so the right tab opens first. */
+    val suggestedRig: AutoRigger.Rig,
 )
 
 /**
@@ -66,6 +69,7 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
             path = path,
             sizeLabel = FileExport.humanSize(file.length()),
             existingClips = AnimationBaker.clipNames(file).filter { it.isNotBlank() },
+            suggestedRig = AutoRigger.suggest(file),
         )
     }
 
@@ -96,6 +100,32 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
             .onFailure {
                 _busy.value = null
                 _message.value = it.message ?: "Could not add the animation."
+            }
+    }
+
+    /**
+     * Builds a skeleton for the model and animates it — a walk cycle or spinning
+     * wheels, which need bones rather than moving the whole object.
+     */
+    fun rig(model: AnimatableModel, rig: AutoRigger.Rig) = viewModelScope.launch {
+        if (_busy.value != null) return@launch
+        _busy.value = "Building the skeleton…"
+
+        val dir = File(getApplication<Application>().filesDir, "models3d").apply { mkdirs() }
+        AutoRigger.rig(File(model.path), rig, dir)
+            .onSuccess { file ->
+                val name = "${model.name} · ${rig.label}"
+                runCatching {
+                    db.generationDao().insert(
+                        GenerationEntity(type = "3d", prompt = name, modelPath = file.absolutePath)
+                    )
+                }
+                _busy.value = null
+                _baked.value = file.absolutePath to name
+            }
+            .onFailure {
+                _busy.value = null
+                _message.value = it.message ?: "Could not rig this model."
             }
     }
 
