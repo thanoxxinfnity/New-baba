@@ -8,6 +8,7 @@ import com.trellis.studio.network.TrellisClient
 import com.trellis.studio.service.GenerationService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,7 @@ data class ModelJob(
     val status: Status = Status.QUEUED,
     val attempt: Int = 0,
     val totalAttempts: Int = 0,
+    val rounds: Int = 0,
     val modelPath: String? = null,
     val error: String? = null,
 ) {
@@ -32,12 +34,14 @@ data class ModelJob(
 
     val progressLabel: String
         get() = when (status) {
-            Status.QUEUED -> "Waiting…"
+            Status.QUEUED -> if (rounds > 0) "Queued again — round ${rounds + 1}" else "Waiting…"
             Status.RUNNING -> when {
                 attempt > 1 -> "Server busy — retry $attempt of $totalAttempts"
                 else -> "Generating…"
             }
             Status.DONE -> "Ready"
+            // Kept short on purpose: the card has one line for this, and a long
+            // sentence was being cut off mid-word.
             Status.FAILED -> error ?: "Failed"
         }
 }
@@ -95,7 +99,10 @@ class ModelQueue private constructor(app: Application) {
     /** Puts a failed job back in the queue. */
     fun retry(id: Long) {
         _jobs.update { list ->
-            list.map { if (it.id == id) it.copy(status = ModelJob.Status.QUEUED, error = null) else it }
+            list.map {
+                if (it.id == id) it.copy(status = ModelJob.Status.QUEUED, rounds = 0, error = null)
+                else it
+            }
         }
         GenerationService.start(appContext)
         start()
@@ -137,12 +144,44 @@ class ModelQueue private constructor(app: Application) {
                         it.copy(status = ModelJob.Status.DONE, modelPath = path, error = null)
                     }
                 }.onFailure { e ->
-                    update(job.id) {
-                        it.copy(status = ModelJob.Status.FAILED, error = e.message ?: "Failed")
+                    // The service refuses on capacity, not on the prompt, so a
+                    // whole exhausted round is worth repeating once the rest of
+                    // the queue has had its turn — moving the job to the back
+                    // spreads the load instead of hammering the same request.
+                    val current = _jobs.value.firstOrNull { it.id == job.id }
+                    val nextRound = (current?.rounds ?: 0) + 1
+                    if (nextRound < MAX_ROUNDS) {
+                        _jobs.update { list ->
+                            val retried = list.firstOrNull { it.id == job.id }?.copy(
+                                status = ModelJob.Status.QUEUED,
+                                rounds = nextRound,
+                                attempt = 0,
+                                error = null,
+                            )
+                            if (retried == null) list
+                            else list.filterNot { it.id == job.id } + retried
+                        }
+                        delay(RETRY_BACKOFF_MS)
+                    } else {
+                        update(job.id) {
+                            it.copy(status = ModelJob.Status.FAILED, error = shortError(e.message))
+                        }
                     }
                 }
             }
         }
+    }
+
+    /** Queue cards show one line, so failures have to fit on one line. */
+    private fun shortError(message: String?): String = when {
+        message == null -> "Failed"
+        message.contains("overloaded", true) || message.contains("refused all", true) ->
+            "NVIDIA's 3D service is overloaded — tap retry later"
+        message.contains("API key", true) -> "Add your NVIDIA API key in Settings"
+        message.contains("internet", true) || message.contains("connection", true) ->
+            "No connection"
+        message.length <= 60 -> message
+        else -> message.take(57).substringBeforeLast(' ') + "…"
     }
 
     private fun update(id: Long, transform: (ModelJob) -> ModelJob) {
@@ -150,6 +189,10 @@ class ModelQueue private constructor(app: Application) {
     }
 
     companion object {
+        /** Full passes through the retry ladder before a job is given up on. */
+        private const val MAX_ROUNDS = 2
+        private const val RETRY_BACKOFF_MS = 15_000L
+
         @Volatile private var instance: ModelQueue? = null
 
         fun get(app: Application): ModelQueue = instance ?: synchronized(this) {

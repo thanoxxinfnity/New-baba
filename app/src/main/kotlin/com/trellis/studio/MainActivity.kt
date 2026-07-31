@@ -48,6 +48,7 @@ sealed class NavRoute(
     object Browser : NavRoute("browser", "Browser", Icons.Outlined.Public, Icons.Filled.Public)
     object Gallery : NavRoute("gallery", "Gallery", Icons.Outlined.Collections, Icons.Filled.Collections)
     object Voice : NavRoute("voice", "Voice", Icons.Outlined.GraphicEq, Icons.Filled.GraphicEq)
+    object Animate : NavRoute("animate", "Animate", Icons.Outlined.Animation, Icons.Filled.Animation)
     object Artifacts : NavRoute("artifacts", "Builds", Icons.Outlined.Android, Icons.Filled.Android)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
@@ -65,7 +66,8 @@ val drawerEntries = listOf(
     DrawerEntry("chat", "Chat", Icons.AutoMirrored.Filled.Chat, "Talk, code, generate images", "Workspace"),
     DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
-    DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "Offline text-to-speech", "Workspace"),
+    DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
+    DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "NVIDIA cloud TTS and voice cloning", "Workspace"),
 
     DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
     DrawerEntry("artifacts", "Builds", Icons.Filled.Android, "APKs, files and build logs", "Developer"),
@@ -204,6 +206,13 @@ fun MainContent() {
                     }
                     composable(NavRoute.Artifacts.route) { ArtifactsScreen(onMenu = openDrawer) }
                     composable(NavRoute.Voice.route) { VoiceScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Animate.route) {
+                        AnimateScreen(
+                            onMenu = openDrawer,
+                            onOpenModel = { path, name -> navController.openViewer(path, name) },
+                            onCreateModel = { go(NavRoute.Generate.route) },
+                        )
+                    }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
 
                     composable(

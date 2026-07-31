@@ -87,6 +87,11 @@ dependencies {
     implementation(libs.protobuf.javalite)
     compileOnly(libs.javax.annotation.api)
 
+    // AnimationBaker writes glTF containers by hand, so its output is checked
+    // byte for byte on the JVM rather than only on a device.
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }

@@ -111,11 +111,14 @@ class TrellisClient(private val context: Context) {
                     if (round < rounds - 1) delay(2_000)
                 }
             }
+            // A rejected key or a bad prompt has to survive as itself; only the
+            // generic server refusal gets rewritten. The text stays short because
+            // it lands on a queue card with a single line for it.
+            val reason = last?.message.orEmpty()
             Result.failure(
-                Exception(
-                    "NVIDIA's 3D service refused all $MAX_ATTEMPTS attempts — it's badly " +
-                        "overloaded right now. Your prompt is fine; try again in a few minutes."
-                )
+                if (reason.contains("server", true) || reason.isBlank())
+                    Exception("NVIDIA's 3D service is overloaded — try again shortly")
+                else last!!
             )
         }
 
