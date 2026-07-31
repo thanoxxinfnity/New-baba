@@ -2,7 +2,10 @@ package com.trellis.studio.network
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -55,6 +58,9 @@ class TrellisClient(private val context: Context) {
         // Failures are a capacity coin-flip; a generous attempt count costs
         // little now that each attempt aborts at 45s instead of 90s.
         const val MAX_ATTEMPTS = 8
+        /** Concurrent requests per round. Two is the sweet spot — more of them
+         *  made the service reject far more often in testing. */
+        const val LANES = 2
     }
 
     /**
@@ -90,19 +96,20 @@ class TrellisClient(private val context: Context) {
             val body = buildJsonObject { put("prompt", styled) }.toString()
             // The endpoint cold-starts and 500s for the first call fairly often,
             // so a couple of retries is the difference between working and not.
-            // Measured: the service 500s on roughly half of first attempts but
-            // every tested prompt (sword, robot, car, tree, head) succeeded within
-            // five tries, so retry generously with backoff.
+            // Whether a request succeeds is a capacity coin-flip on NVIDIA's side,
+            // and a success lands in ~12-20s while a dud burns the full 45s. Two
+            // lanes per round therefore roughly halve the wait: measured live, one
+            // lane returned a model in 19.9s while its twin timed out.
             var last: Throwable? = null
-            repeat(MAX_ATTEMPTS) { attempt ->
-                onAttempt(attempt + 1, MAX_ATTEMPTS)
-                runCatching { invoke(apiKey, body, null) }
-                    .onSuccess { return@withContext Result.success(it) }
-                    .onFailure { e ->
-                        last = e
-                        // Short pause only; the win comes from retrying, not waiting.
-                        if (attempt < MAX_ATTEMPTS - 1) delay(3_000)
-                    }
+            val rounds = (MAX_ATTEMPTS + 1) / LANES
+            repeat(rounds) { round ->
+                onAttempt(round + 1, rounds)
+                val winner = raceOnce(apiKey, body)
+                winner.onSuccess { return@withContext Result.success(it) }
+                winner.onFailure { e ->
+                    last = e
+                    if (round < rounds - 1) delay(2_000)
+                }
             }
             Result.failure(
                 Exception(
@@ -111,6 +118,30 @@ class TrellisClient(private val context: Context) {
                 )
             )
         }
+
+    /**
+     * Fires [LANES] identical requests and returns the first model that lands,
+     * cancelling the losers. Duplicated work is cheap here; waiting is not.
+     */
+    private suspend fun raceOnce(apiKey: String, body: String): Result<String> = coroutineScope {
+        val lanes = List(LANES) { async { runCatching { invoke(apiKey, body, null) } } }
+        var failure: Throwable? = null
+        try {
+            repeat(LANES) {
+                val finished = select {
+                    lanes.forEachIndexed { index, deferred ->
+                        deferred.onAwait { index to it }
+                    }
+                }
+                val (_, result) = finished
+                result.onSuccess { return@coroutineScope Result.success(it) }
+                result.onFailure { failure = it }
+            }
+            Result.failure(failure ?: Exception("3D request failed."))
+        } finally {
+            lanes.forEach { it.cancel() }
+        }
+    }
 
     /** Runs the sample TRELLIS job, which is the only input this deployment accepts. */
     suspend fun generateSample(apiKey: String): Result<String> = withContext(Dispatchers.IO) {

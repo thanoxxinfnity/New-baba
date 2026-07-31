@@ -25,7 +25,10 @@ class NimClient {
         coerceInputValues = true
     }
 
-    private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+    // NVIDIA rejects a charset parameter outright:
+    //   415 "Unsupported media type: application/json; charset=utf-8.
+    //        It must be application/json"
+    private val JSON_MEDIA = "application/json".toMediaType()
     private val BASE_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
     private val MODELS_URL = "https://integrate.api.nvidia.com/v1/models"
 

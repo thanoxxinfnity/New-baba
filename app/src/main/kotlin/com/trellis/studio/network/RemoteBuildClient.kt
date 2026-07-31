@@ -38,7 +38,10 @@ class RemoteBuildClient(private val context: Context) {
         .build()
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; explicitNulls = false }
-    private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+    // NVIDIA rejects a charset parameter outright:
+    //   415 "Unsupported media type: application/json; charset=utf-8.
+    //        It must be application/json"
+    private val JSON_MEDIA = "application/json".toMediaType()
 
     private fun base(url: String) = url.trimEnd('/')
 

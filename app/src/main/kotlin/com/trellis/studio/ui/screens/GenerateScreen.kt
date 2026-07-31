@@ -296,10 +296,15 @@ private fun ThreeDGenerateTab(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Standard is the default; a style only applies once you pick it,
+            // and tapping the active one turns it back off.
             TrellisClient.Detail.entries.forEach { d ->
+                val active = state.detail == d
                 FilterChip(
-                    selected = state.detail == d,
-                    onClick = { vm.setDetail(d) },
+                    selected = active,
+                    onClick = {
+                        vm.setDetail(if (active) TrellisClient.Detail.STANDARD else d)
+                    },
                     label = { Text(d.label, style = MaterialTheme.typography.labelMedium) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Purple40,
