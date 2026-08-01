@@ -3,6 +3,7 @@ package com.trellis.studio.viewmodel
 import android.app.Application
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
+import com.trellis.studio.data.entity.QueuedJobEntity
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.TrellisClient
 import com.trellis.studio.service.GenerationService
@@ -69,23 +70,60 @@ class ModelQueue private constructor(app: Application) {
     val jobs: StateFlow<List<ModelJob>> = _jobs.asStateFlow()
 
     private var worker: Job? = null
-    private var nextId = 1L
+
+    /**
+     * False until restored jobs have been loaded. The service watches this: the
+     * queue looks empty for the first moments after a restart, and stopping on
+     * that would kill the very work being restored.
+     */
+    private val _ready = MutableStateFlow(false)
+    val ready: StateFlow<Boolean> = _ready.asStateFlow()
+
+    init {
+        // Anything left over from a previous run is picked back up. Without this
+        // the queue only existed in memory, so swiping the app away silently
+        // threw away every pending job.
+        scope.launch {
+            val pending = runCatching { db.queueDao().pending() }.getOrDefault(emptyList())
+            if (pending.isEmpty()) { _ready.value = true; return@launch }
+            _jobs.update { current ->
+                current + pending.map { row ->
+                    ModelJob(
+                        id = row.id,
+                        prompt = row.prompt,
+                        detail = runCatching { TrellisClient.Detail.valueOf(row.detail) }
+                            .getOrDefault(TrellisClient.Detail.STANDARD),
+                        rounds = row.rounds,
+                    )
+                }
+            }
+            _ready.value = true
+            GenerationService.start(appContext)
+            start()
+        }
+    }
 
     /** Adds prompts to the queue. Blank lines are ignored, duplicates allowed. */
     fun enqueue(prompts: List<String>, detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD) {
         val clean = prompts.map { it.trim() }.filter { it.isNotBlank() }
         if (clean.isEmpty()) return
-        _jobs.update { current ->
-            current + clean.map { ModelJob(id = nextId++, prompt = it, detail = detail) }
-        }
         // A foreground service is what keeps this running once the app is
-        // backgrounded or swiped away.
+        // backgrounded; the database is what gets it back if the process dies.
         GenerationService.start(appContext)
-        start()
+        scope.launch {
+            clean.forEach { prompt ->
+                val id = runCatching {
+                    db.queueDao().insert(QueuedJobEntity(prompt = prompt, detail = detail.name))
+                }.getOrDefault(System.nanoTime())
+                _jobs.update { it + ModelJob(id = id, prompt = prompt, detail = detail) }
+            }
+            start()
+        }
     }
 
     fun remove(id: Long) {
         _jobs.update { it.filterNot { job -> job.id == id && job.status != ModelJob.Status.RUNNING } }
+        scope.launch { runCatching { db.queueDao().delete(id) } }
     }
 
     fun clearFinished() {
@@ -98,6 +136,12 @@ class ModelQueue private constructor(app: Application) {
 
     /** Puts a failed job back in the queue. */
     fun retry(id: Long) {
+        scope.launch {
+            runCatching {
+                val job = _jobs.value.firstOrNull { it.id == id } ?: return@runCatching
+                db.queueDao().insert(QueuedJobEntity(id = id, prompt = job.prompt, detail = job.detail.name))
+            }
+        }
         _jobs.update { list ->
             list.map {
                 if (it.id == id) it.copy(status = ModelJob.Status.QUEUED, rounds = 0, error = null)
@@ -111,13 +155,14 @@ class ModelQueue private constructor(app: Application) {
     private fun start() {
         if (worker?.isActive == true) return
         worker = scope.launch {
-            val apiKey = prefs.nvidiaKey.first()
             while (true) {
+                val apiKey = prefs.nvidiaKey.first()
                 val job = _jobs.value.firstOrNull { it.status == ModelJob.Status.QUEUED } ?: break
 
                 update(job.id) { it.copy(status = ModelJob.Status.RUNNING, attempt = 0) }
 
                 if (apiKey.isBlank()) {
+                    runCatching { db.queueDao().delete(job.id) }
                     update(job.id) {
                         it.copy(
                             status = ModelJob.Status.FAILED,
@@ -140,6 +185,7 @@ class ModelQueue private constructor(app: Application) {
                             GenerationEntity(type = "3d", prompt = job.prompt, modelPath = path)
                         )
                     }
+                    runCatching { db.queueDao().delete(job.id) }
                     update(job.id) {
                         it.copy(status = ModelJob.Status.DONE, modelPath = path, error = null)
                     }
@@ -161,8 +207,10 @@ class ModelQueue private constructor(app: Application) {
                             if (retried == null) list
                             else list.filterNot { it.id == job.id } + retried
                         }
+                        runCatching { db.queueDao().setRounds(job.id, nextRound) }
                         delay(RETRY_BACKOFF_MS)
                     } else {
+                        runCatching { db.queueDao().delete(job.id) }
                         update(job.id) {
                             it.copy(status = ModelJob.Status.FAILED, error = shortError(e.message))
                         }

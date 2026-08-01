@@ -32,7 +32,8 @@ class AppPrefs(private val context: Context) {
         val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
         val DEFAULT_IMG     = "pollinations/flux"
         val DEFAULT_3D      = "nvidia"
-        val DEFAULT_TTS     = "nvidia/magpie-tts-flow"
+        // Riva voice, not a NIM model id — TTS goes over gRPC to a function id.
+        val DEFAULT_TTS     = "Magpie-Multilingual.EN-US.Sofia"
         val DEFAULT_SYSTEM  = "You are a helpful AI assistant."
 
         /** Added to the system prompt when Hinglish thinking is on. */

@@ -188,7 +188,7 @@ class TrellisClient(private val context: Context) {
             .url(ASSETS_URL)
             .header("Authorization", "Bearer $apiKey")
             .header("accept", "application/json")
-            .post("""{"contentType":"$mime","description":"trellis-input"}""".toRequestBody(JSON_MEDIA))
+            .post("""{"contentType":"$mime","description":"trellis-input"}""".asJsonBody(JSON_MEDIA))
             .build()
 
         val (assetId, uploadUrl) = http.newCall(metaReq).execute().use { resp ->
@@ -224,7 +224,7 @@ class TrellisClient(private val context: Context) {
             .header("NVCF-POLL-SECONDS", "300")
         if (assetId != null) builder.header("NVCF-INPUT-ASSET-REFERENCES", assetId)
 
-        val request = builder.post(bodyJson.toRequestBody(JSON_MEDIA)).build()
+        val request = builder.post(bodyJson.asJsonBody(JSON_MEDIA)).build()
 
         val client = if (assetId != null) slowHttp else http
         val payload = client.newCall(request).execute().use { resp ->
@@ -304,3 +304,15 @@ class TrellisClient(private val context: Context) {
             ?.get("detail")?.jsonPrimitive?.content
     }.getOrNull()
 }
+
+/**
+ * JSON body without a charset parameter.
+ *
+ * NVIDIA rejects a charset outright — 415 "Unsupported media type:
+ * application/json; charset=utf-8. It must be application/json" — and OkHttp's
+ * String.toRequestBody APPENDS "; charset=utf-8" whenever the media type has
+ * none (verified in okhttp 4.12 bytecode). Encoding to bytes first is what
+ * actually stops it: ByteArray.toRequestBody passes the type through untouched.
+ */
+private fun String.asJsonBody(media: okhttp3.MediaType) =
+    toByteArray(Charsets.UTF_8).toRequestBody(media)

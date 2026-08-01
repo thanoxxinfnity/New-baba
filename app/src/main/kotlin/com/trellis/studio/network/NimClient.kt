@@ -66,7 +66,7 @@ class NimClient {
             maxTokens = maxTokens.coerceIn(64, 32768),
             temperature = temperature.coerceIn(0.0, 2.0),
         )
-        val body = json.encodeToString(reqBody).toRequestBody(JSON_MEDIA)
+        val body = json.encodeToString(reqBody).asJsonBody(JSON_MEDIA)
         val request = Request.Builder()
             .url(BASE_URL)
             .header("Authorization", "Bearer $apiKey")
@@ -142,7 +142,7 @@ class NimClient {
             .url(BASE_URL)
             .header("Authorization", "Bearer $apiKey")
             .header("Accept", "text/event-stream")
-            .post(json.encodeToString(reqBody).toRequestBody(JSON_MEDIA))
+            .post(json.encodeToString(reqBody).asJsonBody(JSON_MEDIA))
             .build()
 
         runCatching {
@@ -292,3 +292,15 @@ private fun <T> Result<T>.mapFailure(): Result<T> = this.recoverCatching { e ->
         }
     )
 }
+
+/**
+ * JSON body without a charset parameter.
+ *
+ * NVIDIA rejects a charset outright — 415 "Unsupported media type:
+ * application/json; charset=utf-8. It must be application/json" — and OkHttp's
+ * String.toRequestBody APPENDS "; charset=utf-8" whenever the media type has
+ * none (verified in okhttp 4.12 bytecode). Encoding to bytes first is what
+ * actually stops it: ByteArray.toRequestBody passes the type through untouched.
+ */
+private fun String.asJsonBody(media: okhttp3.MediaType) =
+    toByteArray(Charsets.UTF_8).toRequestBody(media)

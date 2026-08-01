@@ -54,7 +54,7 @@ class ImageGenClient(private val context: Context) {
     ): Result<String> {
         if (apiKey.isBlank()) return Result.failure(Exception("NVIDIA API key missing. Add it in Settings."))
         val reqBody = FluxImageRequest(prompt = prompt, width = width, height = height, seed = seed)
-        val body = json.encodeToString(reqBody).toRequestBody(JSON_MEDIA)
+        val body = json.encodeToString(reqBody).asJsonBody(JSON_MEDIA)
         val request = Request.Builder()
             .url(model.apiBaseUrl)
             .header("Authorization", "Bearer $apiKey")
@@ -78,7 +78,7 @@ class ImageGenClient(private val context: Context) {
             if (negativePrompt.isNotBlank()) add(SdxlPrompt(text = negativePrompt, weight = -1.0))
         }
         val reqBody = SdxlImageRequest(textPrompts = prompts, seed = seed, width = width, height = height)
-        val body = json.encodeToString(reqBody).toRequestBody(JSON_MEDIA)
+        val body = json.encodeToString(reqBody).asJsonBody(JSON_MEDIA)
         val request = Request.Builder()
             .url(model.apiBaseUrl)
             .header("Authorization", "Bearer $apiKey")
@@ -134,3 +134,15 @@ class ImageGenClient(private val context: Context) {
         throw Exception(e.message ?: "Unknown image generation error")
     }
 }
+
+/**
+ * JSON body without a charset parameter.
+ *
+ * NVIDIA rejects a charset outright — 415 "Unsupported media type:
+ * application/json; charset=utf-8. It must be application/json" — and OkHttp's
+ * String.toRequestBody APPENDS "; charset=utf-8" whenever the media type has
+ * none (verified in okhttp 4.12 bytecode). Encoding to bytes first is what
+ * actually stops it: ByteArray.toRequestBody passes the type through untouched.
+ */
+private fun String.asJsonBody(media: okhttp3.MediaType) =
+    toByteArray(Charsets.UTF_8).toRequestBody(media)

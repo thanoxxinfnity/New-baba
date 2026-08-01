@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.trellis.studio.MainActivity
 import com.trellis.studio.R
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -32,6 +34,7 @@ class GenerationService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var watcher: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,8 +43,17 @@ class GenerationService : Service() {
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Starting…", 0, 0))
 
+        // Generation is a long network wait with nothing on screen, which is
+        // exactly what doze suspends. The lock is released in onDestroy.
+        wakeLock = getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "void:generation")
+            ?.apply { runCatching { acquire(WAKE_LOCK_TIMEOUT_MS) } }
+
         val queue = ModelQueue.get(application)
         watcher = scope.launch {
+            // Restoring saved jobs is a database read, so the queue is briefly
+            // empty on a cold start. Stopping then would discard them.
+            queue.ready.first { it }
             queue.jobs.collectLatest { jobs ->
                 val active = jobs.filter {
                     it.status == ModelJob.Status.QUEUED || it.status == ModelJob.Status.RUNNING
@@ -71,6 +83,8 @@ class GenerationService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
+        wakeLock = null
         watcher?.cancel()
         scope.coroutineContext[Job]?.cancel()
         super.onDestroy()
@@ -119,6 +133,8 @@ class GenerationService : Service() {
     companion object {
         private const val CHANNEL_ID = "trellis_generation"
         private const val NOTIFICATION_ID = 4201
+        /** A safety net, not a target — the queue normally finishes long before. */
+        private const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L
 
         /** Safe to call repeatedly; the service ignores duplicate starts. */
         fun start(context: Context) {

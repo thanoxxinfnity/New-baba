@@ -3,6 +3,8 @@ package com.trellis.studio.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -346,29 +348,42 @@ private fun PromptBox(
             maxLines = 3,
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // Concrete openers beat a blank box: they show the level of detail
-            // that actually maps onto bones.
-            listOf("walk", "run and wave", "spin the wheels").forEach { hint ->
+        // The chips and the button fought for the same row, which squeezed the
+        // button until its label wrapped one letter per line. They get a row each,
+        // and the chips scroll rather than shrink.
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf("walk", "run and wave", "spin the wheels", "jump", "wag tail").forEach { hint ->
                 AssistChip(
                     onClick = { text = hint },
                     enabled = enabled,
-                    label = { Text(hint, style = MaterialTheme.typography.labelSmall) },
+                    label = {
+                        Text(hint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    },
                     colors = AssistChipDefaults.assistChipColors(labelColor = TextSecondary),
-                    modifier = Modifier.padding(end = 6.dp),
                 )
             }
-            Spacer(Modifier.weight(1f))
-            FilledTonalButton(
-                onClick = { onGenerate(text); text = "" },
-                enabled = enabled && text.isNotBlank(),
-                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Purple40),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                Icon(Icons.Default.AutoAwesome, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Animate", color = TextPrimary)
-            }
+        }
+        Button(
+            onClick = { onGenerate(text); text = "" },
+            enabled = enabled && text.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Purple40,
+                disabledContainerColor = CardHigh,
+            ),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp),
+                tint = if (enabled && text.isNotBlank()) TextPrimary else TextDisabled)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Animate",
+                color = if (enabled && text.isNotBlank()) TextPrimary else TextDisabled,
+                maxLines = 1,
+            )
         }
     }
 }

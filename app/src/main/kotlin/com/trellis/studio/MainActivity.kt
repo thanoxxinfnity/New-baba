@@ -1,7 +1,12 @@
 package com.trellis.studio
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -80,9 +85,28 @@ const val ROUTE_VIEWER = "viewer"
 const val ROUTE_IMAGE = "image"
 
 class MainActivity : ComponentActivity() {
+
+    /**
+     * Android 13 denies notifications until asked. Without the permission the
+     * generation service's notification never appears, so background work looks
+     * like it is doing nothing — and an invisible foreground notification is the
+     * first thing aggressive battery managers kill.
+     */
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private fun askForNotifications() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        askForNotifications()
         setContent {
             TrellisTheme {
                 MainContent()

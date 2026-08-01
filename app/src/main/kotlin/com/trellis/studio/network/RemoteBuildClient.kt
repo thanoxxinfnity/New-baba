@@ -77,7 +77,7 @@ class RemoteBuildClient(private val context: Context) {
                 val req = Request.Builder()
                     .url("${base(serverUrl)}/exec")
                     .commonHeaders()
-                    .post(payload.toRequestBody(JSON_MEDIA))
+                    .post(payload.asJsonBody(JSON_MEDIA))
                     .build()
                 http.newCall(req).execute().use { resp ->
                     val body = resp.body?.string().orEmpty()
@@ -107,7 +107,7 @@ class RemoteBuildClient(private val context: Context) {
             val req = Request.Builder()
                 .url("${base(serverUrl)}/build")
                 .commonHeaders()
-                .post(payload.toRequestBody(JSON_MEDIA))
+                .post(payload.asJsonBody(JSON_MEDIA))
                 .build()
 
             val jobId = http.newCall(req).execute().use { resp ->
@@ -221,3 +221,15 @@ private fun <T> Result<T>.mapRemoteFailure(): Result<T> = recoverCatching { e ->
         }
     )
 }
+
+/**
+ * JSON body without a charset parameter.
+ *
+ * NVIDIA rejects a charset outright — 415 "Unsupported media type:
+ * application/json; charset=utf-8. It must be application/json" — and OkHttp's
+ * String.toRequestBody APPENDS "; charset=utf-8" whenever the media type has
+ * none (verified in okhttp 4.12 bytecode). Encoding to bytes first is what
+ * actually stops it: ByteArray.toRequestBody passes the type through untouched.
+ */
+private fun String.asJsonBody(media: okhttp3.MediaType) =
+    toByteArray(Charsets.UTF_8).toRequestBody(media)
