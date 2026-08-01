@@ -79,6 +79,12 @@ class TrellisClient(private val context: Context) {
         apiKey: String,
         prompt: String,
         detail: Detail = Detail.STANDARD,
+        /**
+         * Fixes the result. The same prompt and seed give the same model back,
+         * and a new seed gives a different take on the same description — which
+         * is the only kind of "try again differently" the service supports.
+         */
+        seed: Long? = null,
         onAttempt: suspend (attempt: Int, total: Int) -> Unit = { _, _ -> },
     ): Result<String> =
         withContext(Dispatchers.IO) {
@@ -93,7 +99,13 @@ class TrellisClient(private val context: Context) {
             val styled = listOf(prompt.trim(), detail.hint)
                 .filter { it.isNotBlank() }
                 .joinToString(", ")
-            val body = buildJsonObject { put("prompt", styled) }.toString()
+            // Probed against the live schema: prompt, image, seed and
+            // output_format are accepted; anything else returns 422
+            // "Extra inputs are not permitted".
+            val body = buildJsonObject {
+                put("prompt", styled)
+                if (seed != null) put("seed", seed)
+            }.toString()
             // The endpoint cold-starts and 500s for the first call fairly often,
             // so a couple of retries is the difference between working and not.
             // Whether a request succeeds is a capacity coin-flip on NVIDIA's side,
@@ -216,6 +228,9 @@ class TrellisClient(private val context: Context) {
 
     /** POSTs to TRELLIS, follows a 202 poll, and saves the resulting GLB. */
     private suspend fun invoke(apiKey: String, bodyJson: String, assetId: String?): String {
+        // Shared with every other NVIDIA call: the limit is per account, and the
+        // two racing lanes plus a queue behind them saturate it easily.
+        RateLimiter.nvidia.acquire()
         val builder = Request.Builder()
             .url(TRELLIS_URL)
             .header("Authorization", "Bearer $apiKey")
@@ -238,6 +253,9 @@ class TrellisClient(private val context: Context) {
                     pollStatus(apiKey, reqId)
                 }
                 resp.isSuccessful -> body
+                resp.code == 429 -> throw RateLimitedException(
+                    resp.header("Retry-After")?.trim()?.toLongOrNull()?.times(1000)
+                )
                 resp.code == 422 -> throw Exception(extractDetail(body) ?: "TRELLIS rejected the input.")
                 resp.code >= 500 -> throw Exception("TRELLIS failed on the server (${resp.code}). Try again.")
                 else -> throw Exception("3D generation failed (${resp.code}): ${extractDetail(body) ?: body.take(160)}")

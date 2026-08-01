@@ -156,6 +156,103 @@ class MeshSimplifierTest {
         assertTrue(reread.indices.max() == big.indices.max())
     }
 
+    @Test
+    fun `smooth normals are unit length and point outwards`() {
+        val sphere = sphere(40, 40)
+        val normals = MeshSimplifier.smoothNormals(sphere)
+        assertEquals(sphere.vertexCount * 3, normals.size)
+
+        var worstLength = 0f
+        var worstAlignment = 1f
+        for (v in 0 until sphere.vertexCount) {
+            val nx = normals[v * 3]; val ny = normals[v * 3 + 1]; val nz = normals[v * 3 + 2]
+            worstLength = maxOf(worstLength, abs(kotlin.math.sqrt(nx * nx + ny * ny + nz * nz) - 1f))
+            // On a unit sphere centred at the origin the normal is the position,
+            // which makes this checkable exactly rather than by eye.
+            val px = sphere.positions[v * 3]; val py = sphere.positions[v * 3 + 1]; val pz = sphere.positions[v * 3 + 2]
+            val len = kotlin.math.sqrt(px * px + py * py + pz * pz)
+            if (len > 0.01f) {
+                worstAlignment = minOf(worstAlignment, (nx * px + ny * py + nz * pz) / len)
+            }
+        }
+        assertTrue("normals must be unit length, off by $worstLength", worstLength < 1e-3f)
+        assertTrue("normals must face outwards, worst dot $worstAlignment", worstAlignment > 0.98f)
+    }
+
+    @Test
+    fun `normals smooth across duplicated vertices`() {
+        // A UV seam duplicates a position. Both copies must end up with the same
+        // normal, or the seam shows as a hard lighting crease.
+        val sphere = sphere(30, 30)
+        val normals = MeshSimplifier.smoothNormals(sphere)
+
+        val byPosition = HashMap<String, Int>()
+        var compared = 0
+        for (v in 0 until sphere.vertexCount) {
+            val key = "%.4f,%.4f,%.4f".format(
+                sphere.positions[v * 3], sphere.positions[v * 3 + 1], sphere.positions[v * 3 + 2],
+            )
+            val first = byPosition.put(key, v) ?: continue
+            compared++
+            for (k in 0..2) {
+                assertTrue(
+                    "duplicate at $key got different normals",
+                    abs(normals[v * 3 + k] - normals[first * 3 + k]) < 1e-5f,
+                )
+            }
+        }
+        assertTrue("the test mesh should contain duplicated positions", compared > 0)
+    }
+
+    @Test
+    fun `tangents are unit length, perpendicular, and signed`() {
+        val sphere = sphere(30, 30)
+        val normals = MeshSimplifier.smoothNormals(sphere)
+        val tangents = MeshSimplifier.tangents(sphere, normals)
+        assertEquals(sphere.vertexCount * 4, tangents.size)
+
+        for (v in 0 until sphere.vertexCount) {
+            val tx = tangents[v * 4]; val ty = tangents[v * 4 + 1]; val tz = tangents[v * 4 + 2]
+            val w = tangents[v * 4 + 3]
+            val len = kotlin.math.sqrt(tx * tx + ty * ty + tz * tz)
+            assertTrue("tangent $v is not unit length ($len)", abs(len - 1f) < 1e-3f)
+            assertTrue("handedness must be +1 or -1, got $w", w == 1f || w == -1f)
+            val dot = tx * normals[v * 3] + ty * normals[v * 3 + 1] + tz * normals[v * 3 + 2]
+            assertTrue("tangent $v is not perpendicular to its normal ($dot)", abs(dot) < 1e-3f)
+        }
+    }
+
+    @Test
+    fun `normals and tangents survive the glb round trip`() {
+        val sphere = sphere(30, 30)
+        val normals = MeshSimplifier.smoothNormals(sphere)
+        val tangents = MeshSimplifier.tangents(sphere, normals)
+        val bytes = MeshSimplifier.writeGlb(sphere, normals, tangents)
+
+        val json = String(bytes, 20, le32(bytes, 12))
+        assertTrue("NORMAL must be declared", json.contains("\"NORMAL\""))
+        assertTrue("TANGENT must be declared", json.contains("\"TANGENT\""))
+
+        val file = java.io.File.createTempFile("shaded", ".glb").apply {
+            writeBytes(bytes); deleteOnExit()
+        }
+        val reread = ModelExporter.parseGlb(file)
+        assertEquals("adding attributes must not disturb the mesh", sphere.vertexCount, reread.vertexCount)
+        assertEquals(sphere.triangleCount, reread.triangleCount)
+    }
+
+    @Test
+    fun `the rewritten material is not metal`() {
+        // Generated models omit metallicFactor, which glTF defaults to 1.0 — a
+        // rough metal has no diffuse response, so the model renders dark and
+        // colourless whatever its texture says.
+        val bytes = MeshSimplifier.writeGlb(sphere(10, 10).copy(texturePng = fakePng()))
+        val json = String(bytes, 20, le32(bytes, 12))
+        assertTrue("metallicFactor must be written explicitly", json.contains("metallicFactor"))
+        assertTrue("and it must be 0", json.contains("\"metallicFactor\":0"))
+        assertTrue("the texture must drive base colour", json.contains("baseColorTexture"))
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private fun le32(b: ByteArray, i: Int) =
@@ -182,8 +279,10 @@ class MeshSimplifierTest {
             for (s in 0 until segments) {
                 val a = r * (segments + 1) + s
                 val b = a + segments + 1
-                indices += a; indices += b; indices += a + 1
-                indices += a + 1; indices += b; indices += b + 1
+                // Counter-clockwise seen from outside, which is what glTF means by
+                // front-facing — the other order makes every normal point inwards.
+                indices += a; indices += a + 1; indices += b
+                indices += a + 1; indices += b + 1; indices += b
             }
         }
         return ModelExporter.Mesh(

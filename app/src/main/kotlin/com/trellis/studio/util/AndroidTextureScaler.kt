@@ -19,9 +19,11 @@ object AndroidTextureScaler : MeshSimplifier.TextureScaler {
         BitmapFactory.decodeByteArray(png, 0, png.size, bounds)
         val longest = max(bounds.outWidth, bounds.outHeight)
         if (longest <= 0) return null
-        // Already at or below the target — re-encoding would only lose quality.
-        if (longest <= maxEdge) return null
+        // Exactly the size asked for — re-encoding would only lose quality.
+        if (longest == maxEdge) return null
 
+        // Only ever sample down. Upscaling is allowed because a pipeline may want
+        // a fixed texture size, but it must start from the full-resolution source.
         var sample = 1
         while (longest / (sample * 2) >= maxEdge) sample *= 2
 
@@ -34,7 +36,7 @@ object AndroidTextureScaler : MeshSimplifier.TextureScaler {
         ) ?: return null
 
         val scale = maxEdge.toFloat() / max(decoded.width, decoded.height)
-        val out = if (scale >= 1f) decoded else Bitmap.createScaledBitmap(
+        val out = if (scale == 1f) decoded else Bitmap.createScaledBitmap(
             decoded,
             (decoded.width * scale).roundToInt().coerceAtLeast(1),
             (decoded.height * scale).roundToInt().coerceAtLeast(1),

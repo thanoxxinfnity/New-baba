@@ -82,6 +82,53 @@ class BatchExportTest {
     }
 
     @Test
+    fun `a reduced batch still produces a glb for every model`() = runBlocking {
+        // The reduced copy used to be written into the same folder the export
+        // read from, so a GLB export copied the file onto itself — and copyTo
+        // deletes the target first, which destroyed it.
+        val models = (1..3).map { i ->
+            temp.newFile("r$i.glb").apply { writeBytes(triangleGlb()) }
+        }
+        val zip = ModelExporter.exportBatch(
+            models = models,
+            formats = listOf(ModelExporter.Format.GLB, ModelExporter.Format.OBJ),
+            outputDir = temp.newFolder("reduced"),
+            detail = MeshSimplifier.Detail.LOW,
+        ).getOrThrow()
+
+        ZipFile(zip).use { archive ->
+            val entries = archive.entries().toList().map { it.name }
+            assertTrue("nothing should have been skipped: $entries", entries.none { it == "SKIPPED.txt" })
+            for (i in 1..3) {
+                assertTrue("r$i lost its .glb: $entries", entries.contains("r$i/r$i.glb"))
+            }
+        }
+    }
+
+    @Test
+    fun `full detail still gains shading in a batch`() = runBlocking {
+        val model = temp.newFile("full.glb").apply { writeBytes(triangleGlb()) }
+        val zip = ModelExporter.exportBatch(
+            models = listOf(model),
+            formats = listOf(ModelExporter.Format.GLB),
+            outputDir = temp.newFolder("fulldetail"),
+            detail = MeshSimplifier.Detail.FULL,
+        ).getOrThrow()
+
+        ZipFile(zip).use { archive ->
+            val entry = archive.entries().toList().first { it.name.endsWith(".glb") }
+            val bytes = archive.getInputStream(entry).readBytes()
+            val jsonLength = (bytes[12].toInt() and 0xff) or ((bytes[13].toInt() and 0xff) shl 8) or
+                ((bytes[14].toInt() and 0xff) shl 16)
+            val json = String(bytes, 20, jsonLength)
+            // Even when nothing is reduced, the rewrite is what supplies the
+            // normals and the metallic factor a generated model ships without.
+            assertTrue("full detail should still add normals", json.contains("\"NORMAL\""))
+            assertTrue("and fix the metallic default", json.contains("\"metallicFactor\":0"))
+        }
+    }
+
+    @Test
     fun `an empty selection fails instead of writing an empty zip`() = runBlocking {
         val result = ModelExporter.exportBatch(
             models = emptyList(),

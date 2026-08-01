@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,6 +80,9 @@ fun ModelViewerScreen(
     // Asked before every export, the way Meshy and Tripo do it.
     var detail by remember { mutableStateOf(MeshSimplifier.Detail.FULL) }
     var size by remember { mutableStateOf<MeshSimplifier.Size?>(null) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    // Null until the user opens Advanced; then it overrides the preset entirely.
+    var advanced by remember { mutableStateOf<MeshSimplifier.Options?>(null) }
     var clipNames by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val file = remember(currentPath) { File(currentPath) }
@@ -283,6 +287,18 @@ fun ModelViewerScreen(
         }
     }
 
+    // ---- Advanced quality --------------------------------------------------
+    if (showAdvanced) {
+        ModalBottomSheet(onDismissRequest = { showAdvanced = false }, containerColor = SurfDark) {
+            AdvancedSheet(
+                original = size,
+                start = advanced ?: MeshSimplifier.Options.of(detail),
+                onApply = { advanced = it; showAdvanced = false },
+                onReset = { advanced = null; showAdvanced = false },
+            )
+        }
+    }
+
     // ---- Bake motion into the model ---------------------------------------
     if (showAnimate) {
         ModalBottomSheet(onDismissRequest = { showAnimate = false }, containerColor = SurfDark) {
@@ -377,7 +393,9 @@ fun ModelViewerScreen(
                 DetailPicker(
                     current = detail,
                     original = size,
-                    onPick = { detail = it },
+                    advanced = advanced,
+                    onPick = { detail = it; advanced = null },
+                    onAdvanced = { showAdvanced = true },
                 )
                 HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
                 Spacer(Modifier.height(6.dp))
@@ -404,12 +422,17 @@ fun ModelViewerScreen(
                         modifier = Modifier.clickable(enabled = exporting == null) {
                             scope.launch {
                                 val dir = FileExport.outputDir(context)
-                                val source = if (detail.isFull) file else {
-                                    exporting = "Reducing to ${detail.label}…"
-                                    MeshSimplifier.simplify(file, detail, dir, AndroidTextureScaler)
+                                val options = advanced ?: MeshSimplifier.Options.of(detail)
+                                val source = if (options.changesNothing) file else {
+                                    exporting = "Preparing the mesh…"
+                                    // A separate folder, so the intermediate can keep
+                                    // the model's own name without overwriting it.
+                                    MeshSimplifier.process(
+                                        file, options, File(dir, "prepared"), AndroidTextureScaler, suffix = "",
+                                    )
                                         .getOrElse { e ->
                                             exporting = null
-                                            snackbar.showSnackbar(e.message ?: "Could not reduce the model")
+                                            snackbar.showSnackbar(e.message ?: "Could not prepare the model")
                                             return@launch
                                         }
                                 }
@@ -443,12 +466,15 @@ fun ModelViewerScreen(
                     modifier = Modifier.clickable(enabled = exporting == null) {
                         scope.launch {
                             val dir = FileExport.outputDir(context)
-                            val source = if (detail.isFull) file else {
-                                exporting = "Reducing to ${detail.label}…"
-                                MeshSimplifier.simplify(file, detail, dir, AndroidTextureScaler)
+                            val options = advanced ?: MeshSimplifier.Options.of(detail)
+                            val source = if (options.changesNothing) file else {
+                                exporting = "Preparing the mesh…"
+                                MeshSimplifier.process(
+                                    file, options, File(dir, "prepared"), AndroidTextureScaler, suffix = "",
+                                )
                                     .getOrElse { e ->
                                         exporting = null
-                                        snackbar.showSnackbar(e.message ?: "Could not reduce the model")
+                                        snackbar.showSnackbar(e.message ?: "Could not prepare the model")
                                         return@launch
                                     }
                             }
@@ -483,7 +509,9 @@ fun ModelViewerScreen(
 private fun DetailPicker(
     current: MeshSimplifier.Detail,
     original: MeshSimplifier.Size?,
+    advanced: MeshSimplifier.Options?,
     onPick: (MeshSimplifier.Detail) -> Unit,
+    onAdvanced: () -> Unit,
 ) {
     Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -522,13 +550,204 @@ private fun DetailPicker(
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(
-            current.note,
-            style = MaterialTheme.typography.labelSmall,
-            color = TextDisabled,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                advanced?.let { o ->
+                    buildString {
+                        append(if (o.targetTriangles > 0) "%,d tris".format(o.targetTriangles) else "all tris")
+                        if (o.textureSize > 0) append(" · ${o.textureSize}px")
+                        if (o.smoothNormals) append(" · smooth")
+                        if (o.tangents) append(" · tangents")
+                    }
+                } ?: current.note,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (advanced != null) Cyan else TextDisabled,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onAdvanced) {
+                Icon(Icons.Default.Tune, null, tint = Pink, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Advanced", color = Pink, style = MaterialTheme.typography.labelMedium)
+            }
+        }
     }
 }
+
+/**
+ * Full control over the export, for people who want to tune it themselves.
+ *
+ * The texture options run past the source resolution on purpose — a game
+ * pipeline sometimes wants a fixed size — but going above what the model
+ * actually has is labelled as upscaling, because it cannot invent detail that
+ * was never generated.
+ */
+@Composable
+private fun AdvancedSheet(
+    original: MeshSimplifier.Size?,
+    start: MeshSimplifier.Options,
+    onApply: (MeshSimplifier.Options) -> Unit,
+    onReset: () -> Unit,
+) {
+    var triangles by remember { mutableIntStateOf(start.targetTriangles) }
+    var texture by remember { mutableIntStateOf(start.textureSize) }
+    var smooth by remember { mutableStateOf(start.smoothNormals) }
+    var tangents by remember { mutableStateOf(start.tangents) }
+
+    val sourceTriangles = original?.triangles ?: 0
+
+    Column(Modifier.padding(bottom = 28.dp).verticalScroll(rememberScrollState())) {
+        Text(
+            "Advanced",
+            style = MaterialTheme.typography.titleLarge.copy(brush = NeonBrush),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+        Text(
+            "Everything the export can change. Set it once and it overrides the preset.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+
+        // ---- geometry ------------------------------------------------------
+        Spacer(Modifier.height(14.dp))
+        SheetLabel("Triangles", if (sourceTriangles > 0) "model has %,d".format(sourceTriangles) else null)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(0 to "Keep all", 100_000 to "100k", 50_000 to "50k", 25_000 to "25k",
+                   10_000 to "10k", 5_000 to "5k", 2_000 to "2k", 1_000 to "1k").forEach { (value, label) ->
+                FilterChip(
+                    selected = triangles == value,
+                    onClick = { triangles = value },
+                    label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Purple40, selectedLabelColor = TextPrimary,
+                        containerColor = CardDark, labelColor = TextSecondary,
+                    ),
+                )
+            }
+        }
+
+        // ---- texture -------------------------------------------------------
+        Spacer(Modifier.height(10.dp))
+        SheetLabel("Texture", "generated at 1024px")
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(0 to "Original", 4096 to "4K", 2048 to "2K", 1024 to "1K",
+                   512 to "512", 256 to "256").forEach { (value, label) ->
+                FilterChip(
+                    selected = texture == value,
+                    onClick = { texture = value },
+                    label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Purple40, selectedLabelColor = TextPrimary,
+                        containerColor = CardDark, labelColor = TextSecondary,
+                    ),
+                )
+            }
+        }
+        if (texture > SOURCE_TEXTURE) {
+            Text(
+                "${texture}px is above the ${SOURCE_TEXTURE}px the model was generated at. " +
+                    "It will be upscaled — the file grows but no new detail appears.",
+                style = MaterialTheme.typography.labelSmall,
+                color = Amber,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            )
+        }
+
+        // ---- shading -------------------------------------------------------
+        Spacer(Modifier.height(10.dp))
+        SheetLabel("Shading", null)
+        ListItem(
+            headlineContent = { Text("Smooth normals", color = TextPrimary) },
+            supportingContent = {
+                Text(
+                    "Generated models ship without normals, so engines light every " +
+                        "triangle as a separate facet. This is the biggest visual change.",
+                    color = TextDisabled, style = MaterialTheme.typography.labelSmall,
+                )
+            },
+            trailingContent = {
+                Switch(
+                    checked = smooth,
+                    onCheckedChange = { smooth = it; if (!it) tangents = false },
+                    colors = SwitchDefaults.colors(checkedTrackColor = Purple40),
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = SurfDark),
+        )
+        ListItem(
+            headlineContent = {
+                Text("Tangents", color = if (smooth) TextPrimary else TextDisabled)
+            },
+            supportingContent = {
+                Text(
+                    "Needed before Unity or Unreal can light the model with a normal map.",
+                    color = TextDisabled, style = MaterialTheme.typography.labelSmall,
+                )
+            },
+            trailingContent = {
+                Switch(
+                    checked = tangents,
+                    enabled = smooth,
+                    onCheckedChange = { tangents = it },
+                    colors = SwitchDefaults.colors(checkedTrackColor = Purple40),
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = SurfDark),
+        )
+
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(
+                onClick = onReset,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.weight(1f),
+            ) { Text("Use preset", color = TextSecondary) }
+            Button(
+                onClick = {
+                    onApply(
+                        MeshSimplifier.Options(
+                            targetTriangles = triangles,
+                            textureSize = texture,
+                            smoothNormals = smooth,
+                            tangents = tangents,
+                        )
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Purple40),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.weight(1f),
+            ) { Text("Apply", color = TextPrimary) }
+        }
+    }
+}
+
+@Composable
+private fun SheetLabel(title: String, note: String?) {
+    Row(
+        Modifier.padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.labelLarge, color = Cyan)
+        note?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(it, style = MaterialTheme.typography.labelSmall, color = TextDisabled)
+        }
+    }
+}
+
+/** What TRELLIS actually generates, so upscaling can be called out honestly. */
+private const val SOURCE_TEXTURE = 1024
 
 @Composable
 private fun BusyRow(label: String) {

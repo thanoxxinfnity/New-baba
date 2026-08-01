@@ -74,7 +74,7 @@ class NimClient {
             .post(body)
             .build()
 
-        runCatching {
+        RateLimiter.nvidia.withRetry(retryAfterMillis = ::retryAfter) {
             client.newCall(request).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 when {
@@ -85,7 +85,9 @@ class NimClient {
                         throw Exception("Model \"$model\" is not enabled for your NVIDIA account. Pick another model.")
 
                     response.code == 429 ->
-                        throw Exception("Rate limit reached. Wait a moment and retry.")
+                        // Carries the code so the limiter recognises it, and the
+                        // server's own Retry-After when it sent one.
+                        throw RateLimitedException(retryAfterOf(response))
 
                     // 529 = NVIDIA capacity; 502/503/504 = upstream hiccup. Both are
                     // transient and say nothing about the request being wrong.
@@ -145,7 +147,7 @@ class NimClient {
             .post(json.encodeToString(reqBody).asJsonBody(JSON_MEDIA))
             .build()
 
-        runCatching {
+        RateLimiter.nvidia.withRetry(retryAfterMillis = ::retryAfter) {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val raw = response.body?.string().orEmpty()
@@ -153,7 +155,7 @@ class NimClient {
                         when (response.code) {
                             401, 403 -> "API key rejected (${response.code}). Check your nvapi- key in Settings."
                             404 -> "Model \"$model\" is not enabled for your NVIDIA account. Pick another model."
-                            429 -> "Rate limit reached. Wait a moment and retry."
+                            429 -> throw RateLimitedException(retryAfterOf(response))
                             503, 529 -> "This model is overloaded right now. Try again or pick another model."
                             502, 504 -> "NVIDIA's server didn't respond. Try again in a moment."
                             else -> friendlyError(response.code, raw)
@@ -252,6 +254,12 @@ class NimClient {
         }
     }
 
+    /** Seconds NVIDIA asked us to wait, when it said so. */
+    private fun retryAfterOf(response: Response): Long? =
+        response.header("Retry-After")?.trim()?.toLongOrNull()?.times(1000)
+
+    private fun retryAfter(e: Throwable): Long? = (e as? RateLimitedException)?.retryAfterMs
+
     /** Reads an image off disk and returns a data: URL for the vision content array. */
     private fun encodeImage(path: String): String? {
         val file = File(path)
@@ -283,9 +291,15 @@ class NimClient {
     }
 }
 
+/** A 429, kept as its own type so the limiter can tell it from a real failure. */
+class RateLimitedException(val retryAfterMs: Long? = null) :
+    Exception("Rate limit reached (429). Waiting before the next try.")
+
 private fun <T> Result<T>.mapFailure(): Result<T> = this.recoverCatching { e ->
     throw Exception(
         when (e) {
+            is RateLimitedException ->
+                "NVIDIA's rate limit is still saturated after several retries. Wait a minute."
             is java.net.UnknownHostException -> "No internet connection."
             is java.net.SocketTimeoutException -> "The model took too long to respond. Try again or pick a faster model."
             else -> e.message ?: "Unknown network error"

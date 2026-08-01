@@ -24,6 +24,8 @@ data class ModelJob(
     val id: Long,
     val prompt: String,
     val detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD,
+    /** Set to repeat a result exactly, or to ask for a different take. */
+    val seed: Long? = null,
     val status: Status = Status.QUEUED,
     val attempt: Int = 0,
     val totalAttempts: Int = 0,
@@ -104,7 +106,11 @@ class ModelQueue private constructor(app: Application) {
     }
 
     /** Adds prompts to the queue. Blank lines are ignored, duplicates allowed. */
-    fun enqueue(prompts: List<String>, detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD) {
+    fun enqueue(
+        prompts: List<String>,
+        detail: TrellisClient.Detail = TrellisClient.Detail.STANDARD,
+        seed: Long? = null,
+    ) {
         val clean = prompts.map { it.trim() }.filter { it.isNotBlank() }
         if (clean.isEmpty()) return
         // A foreground service is what keeps this running once the app is
@@ -115,7 +121,7 @@ class ModelQueue private constructor(app: Application) {
                 val id = runCatching {
                     db.queueDao().insert(QueuedJobEntity(prompt = prompt, detail = detail.name))
                 }.getOrDefault(System.nanoTime())
-                _jobs.update { it + ModelJob(id = id, prompt = prompt, detail = detail) }
+                _jobs.update { it + ModelJob(id = id, prompt = prompt, detail = detail, seed = seed) }
             }
             start()
         }
@@ -176,6 +182,7 @@ class ModelQueue private constructor(app: Application) {
                     apiKey = apiKey,
                     prompt = job.prompt,
                     detail = job.detail,
+                    seed = job.seed,
                     onAttempt = { attempt, total ->
                         update(job.id) { it.copy(attempt = attempt, totalAttempts = total) }
                     },

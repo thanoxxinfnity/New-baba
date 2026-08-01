@@ -37,7 +37,7 @@ object MeshSimplifier {
         /** Longest texture edge in pixels; 0 keeps the original. */
         val textureSize: Int,
     ) {
-        FULL("Full detail", "Every triangle as generated — film, print, sculpting", 0, 0),
+        FULL("Full detail", "Every triangle kept, plus smooth shading — film, print, sculpting", 0, 0),
         HIGH("High", "About 40k triangles, 1K texture — hero props on PC and console", 40_000, 1024),
         MEDIUM("Medium", "About 15k triangles, 1K texture — the usual game budget", 15_000, 1024),
         LOW("Low", "About 6k triangles, 512px texture — mobile, many objects", 6_000, 512),
@@ -53,6 +53,38 @@ object MeshSimplifier {
      */
     fun interface TextureScaler {
         fun scale(png: ByteArray, maxEdge: Int): ByteArray?
+    }
+
+    /**
+     * Everything the export can change, for the Advanced sheet. The presets are
+     * just named points in this space.
+     */
+    data class Options(
+        /** 0 keeps every triangle. */
+        val targetTriangles: Int = 0,
+        /** Longest texture edge; 0 keeps the original. */
+        val textureSize: Int = 0,
+        /**
+         * Generated models ship POSITION and UV only — no normals — so engines
+         * fall back to flat shading and every triangle reads as a separate facet.
+         * Computing smooth normals is the single biggest visual change available.
+         */
+        val smoothNormals: Boolean = false,
+        /** Needed before an engine can light the model with a normal map. */
+        val tangents: Boolean = false,
+    ) {
+        val changesNothing get() =
+            targetTriangles <= 0 && textureSize <= 0 && !smoothNormals && !tangents
+
+        companion object {
+            fun of(detail: Detail) = Options(
+                targetTriangles = detail.targetTriangles,
+                textureSize = detail.textureSize,
+                // Every preset gets normals: there is no reason to ship a model
+                // that lights up faceted when smoothing costs a few milliseconds.
+                smoothNormals = true,
+            )
+        }
     }
 
     /** What a model costs right now, for showing next to the choices. */
@@ -72,32 +104,205 @@ object MeshSimplifier {
         detail: Detail,
         outputDir: File,
         scaler: TextureScaler? = null,
+        suffix: String = detail.name.lowercase(),
+    ): Result<File> = process(glb, Options.of(detail), outputDir, scaler, suffix)
+
+    /**
+     * The general form: applies [options] and writes a new .glb, or returns the
+     * input untouched when there is nothing to do.
+     */
+    suspend fun process(
+        glb: File,
+        options: Options,
+        outputDir: File,
+        scaler: TextureScaler? = null,
+        suffix: String = "custom",
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            if (detail.isFull) return@runCatching glb
+            if (options.changesNothing) return@runCatching glb
             outputDir.mkdirs()
 
             val mesh = ModelExporter.parseGlb(glb)
 
             // The texture is the bigger half of the file — measured on real
-            // output, 52% to 66% of the bytes — so shrinking it matters at least
-            // as much as dropping triangles.
-            val texture = if (detail.textureSize > 0 && mesh.texturePng != null && scaler != null) {
-                scaler.scale(mesh.texturePng, detail.textureSize) ?: mesh.texturePng
+            // output, 52% to 66% of the bytes — so its size matters at least as
+            // much as the triangle count.
+            val texture = if (options.textureSize > 0 && mesh.texturePng != null && scaler != null) {
+                scaler.scale(mesh.texturePng, options.textureSize) ?: mesh.texturePng
             } else {
                 mesh.texturePng
             }
 
-            val overBudget = detail.targetTriangles in 1 until mesh.triangleCount
-            // Already small enough in both respects: rebuilding would lose
-            // quality for nothing.
-            if (!overBudget && texture === mesh.texturePng) return@runCatching glb
+            val overBudget = options.targetTriangles in 1 until mesh.triangleCount
+            if (!overBudget && texture === mesh.texturePng &&
+                !options.smoothNormals && !options.tangents
+            ) return@runCatching glb
 
-            val reduced = if (overBudget) reduce(mesh, detail.targetTriangles) else mesh
-            val target = File(outputDir, "${glb.nameWithoutExtension}_${detail.name.lowercase()}.glb")
-            target.writeBytes(writeGlb(reduced.copy(texturePng = texture)))
+            val reduced = (if (overBudget) reduce(mesh, options.targetTriangles) else mesh)
+                .copy(texturePng = texture)
+
+            // Order matters: normals are computed after reduction, or they would
+            // describe a surface that no longer exists.
+            val normals = if (options.smoothNormals || options.tangents) smoothNormals(reduced) else null
+            val tangents = if (options.tangents && normals != null) tangents(reduced, normals) else null
+
+            // An empty suffix keeps the original stem, which callers use when the
+            // rewrite is an intermediate and the exported files should still be
+            // named after the model rather than after the preset.
+            val name = if (suffix.isBlank()) glb.nameWithoutExtension
+            else "${glb.nameWithoutExtension}_$suffix"
+            val target = File(outputDir, "$name.glb")
+            require(target.absolutePath != glb.absolutePath) {
+                "Cannot write the reduced model over its own source."
+            }
+            target.writeBytes(writeGlb(reduced, normals, tangents))
             target
         }
+    }
+
+    // --------------------------------------------------------------- shading
+
+    /**
+     * Per-vertex normals, area-weighted and smoothed across UV seams.
+     *
+     * Smoothing has to happen on welded positions. A generated mesh duplicates
+     * vertices wherever the UV chart splits — measured on real output, 17566
+     * stored vertices for 12284 distinct positions — so accumulating per stored
+     * vertex would leave a hard lighting crease along every seam.
+     */
+    internal fun smoothNormals(mesh: ModelExporter.Mesh): FloatArray {
+        val p = mesh.positions
+        val count = mesh.vertexCount
+        val weldOf = weldByPosition(p, count)
+
+        val acc = FloatArray(count * 3)
+        var t = 0
+        while (t < mesh.indices.size) {
+            val a = mesh.indices[t]; val b = mesh.indices[t + 1]; val c = mesh.indices[t + 2]
+            val ax = p[b * 3] - p[a * 3]; val ay = p[b * 3 + 1] - p[a * 3 + 1]; val az = p[b * 3 + 2] - p[a * 3 + 2]
+            val bx = p[c * 3] - p[a * 3]; val by = p[c * 3 + 1] - p[a * 3 + 1]; val bz = p[c * 3 + 2] - p[a * 3 + 2]
+            // Un-normalised cross product: its length is twice the triangle's
+            // area, which is exactly the weighting a smooth normal wants.
+            val nx = ay * bz - az * by
+            val ny = az * bx - ax * bz
+            val nz = ax * by - ay * bx
+            for (v in intArrayOf(a, b, c)) {
+                val w = weldOf[v]
+                acc[w * 3] += nx; acc[w * 3 + 1] += ny; acc[w * 3 + 2] += nz
+            }
+            t += 3
+        }
+
+        val out = FloatArray(count * 3)
+        for (v in 0 until count) {
+            val w = weldOf[v]
+            var x = acc[w * 3]; var y = acc[w * 3 + 1]; var z = acc[w * 3 + 2]
+            val len = kotlin.math.sqrt(x * x + y * y + z * z)
+            if (len > 1e-12f) { x /= len; y /= len; z /= len } else { x = 0f; y = 1f; z = 0f }
+            out[v * 3] = x; out[v * 3 + 1] = y; out[v * 3 + 2] = z
+        }
+        return out
+    }
+
+    /**
+     * Per-vertex tangents in glTF's VEC4 form, w carrying the bitangent sign.
+     * Without these an engine cannot apply a normal map at all.
+     */
+    internal fun tangents(mesh: ModelExporter.Mesh, normals: FloatArray): FloatArray {
+        val count = mesh.vertexCount
+        if (mesh.uvs.size < count * 2) return FloatArray(count * 4) { if (it % 4 == 0) 1f else if (it % 4 == 3) 1f else 0f }
+
+        val p = mesh.positions
+        val uv = mesh.uvs
+        val tan = FloatArray(count * 3)
+        val bitan = FloatArray(count * 3)
+
+        var t = 0
+        while (t < mesh.indices.size) {
+            val a = mesh.indices[t]; val b = mesh.indices[t + 1]; val c = mesh.indices[t + 2]
+            val e1x = p[b * 3] - p[a * 3]; val e1y = p[b * 3 + 1] - p[a * 3 + 1]; val e1z = p[b * 3 + 2] - p[a * 3 + 2]
+            val e2x = p[c * 3] - p[a * 3]; val e2y = p[c * 3 + 1] - p[a * 3 + 1]; val e2z = p[c * 3 + 2] - p[a * 3 + 2]
+            val du1 = uv[b * 2] - uv[a * 2]; val dv1 = uv[b * 2 + 1] - uv[a * 2 + 1]
+            val du2 = uv[c * 2] - uv[a * 2]; val dv2 = uv[c * 2 + 1] - uv[a * 2 + 1]
+
+            val det = du1 * dv2 - du2 * dv1
+            // A degenerate UV triangle has no tangent frame to give.
+            if (kotlin.math.abs(det) > 1e-12f) {
+                val r = 1f / det
+                val tx = (e1x * dv2 - e2x * dv1) * r
+                val ty = (e1y * dv2 - e2y * dv1) * r
+                val tz = (e1z * dv2 - e2z * dv1) * r
+                val bx = (e2x * du1 - e1x * du2) * r
+                val by = (e2y * du1 - e1y * du2) * r
+                val bz = (e2z * du1 - e1z * du2) * r
+                for (v in intArrayOf(a, b, c)) {
+                    tan[v * 3] += tx; tan[v * 3 + 1] += ty; tan[v * 3 + 2] += tz
+                    bitan[v * 3] += bx; bitan[v * 3 + 1] += by; bitan[v * 3 + 2] += bz
+                }
+            }
+            t += 3
+        }
+
+        val out = FloatArray(count * 4)
+        for (v in 0 until count) {
+            val nx = normals[v * 3]; val ny = normals[v * 3 + 1]; val nz = normals[v * 3 + 2]
+            var tx = tan[v * 3]; var ty = tan[v * 3 + 1]; var tz = tan[v * 3 + 2]
+            // Gram-Schmidt: the tangent must be perpendicular to the normal.
+            val dot = nx * tx + ny * ty + nz * tz
+            tx -= nx * dot; ty -= ny * dot; tz -= nz * dot
+            val len = kotlin.math.sqrt(tx * tx + ty * ty + tz * tz)
+            if (len > 1e-12f) { tx /= len; ty /= len; tz /= len } else {
+                // Any perpendicular will do when the UVs gave nothing usable.
+                if (kotlin.math.abs(nx) < 0.9f) { tx = 1f; ty = 0f; tz = 0f } else { tx = 0f; ty = 1f; tz = 0f }
+                val d2 = nx * tx + ny * ty + nz * tz
+                tx -= nx * d2; ty -= ny * d2; tz -= nz * d2
+                val l2 = kotlin.math.sqrt(tx * tx + ty * ty + tz * tz).coerceAtLeast(1e-12f)
+                tx /= l2; ty /= l2; tz /= l2
+            }
+            // Handedness: which way the bitangent points relative to n x t.
+            val cx = ny * tz - nz * ty
+            val cy = nz * tx - nx * tz
+            val cz = nx * ty - ny * tx
+            val sign = if (cx * bitan[v * 3] + cy * bitan[v * 3 + 1] + cz * bitan[v * 3 + 2] < 0f) -1f else 1f
+            out[v * 4] = tx; out[v * 4 + 1] = ty; out[v * 4 + 2] = tz; out[v * 4 + 3] = sign
+        }
+        return out
+    }
+
+    /**
+     * Maps every vertex to the first vertex sharing its position.
+     *
+     * The key is packed exactly, not hashed. An earlier version XOR-ed together
+     * multiplied coordinates, which collides — and a collision welds two
+     * unrelated vertices, so their face normals sum and the result can point
+     * anywhere, including straight into the surface.
+     */
+    private fun weldByPosition(p: FloatArray, count: Int): IntArray {
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var minZ = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
+        var i = 0
+        while (i < count * 3) {
+            minX = min(minX, p[i]); maxX = max(maxX, p[i])
+            minY = min(minY, p[i + 1]); maxY = max(maxY, p[i + 1])
+            minZ = min(minZ, p[i + 2]); maxZ = max(maxZ, p[i + 2])
+            i += 3
+        }
+        // Quantise each axis into its own bounded range, so all three fit inside
+        // one Long with room to spare and every distinct cell gets its own value.
+        val spanX = (maxX - minX).coerceAtLeast(1e-9f)
+        val spanY = (maxY - minY).coerceAtLeast(1e-9f)
+        val spanZ = (maxZ - minZ).coerceAtLeast(1e-9f)
+
+        val weldOf = IntArray(count)
+        val seen = HashMap<Long, Int>(count)
+        for (v in 0 until count) {
+            val qx = ((p[v * 3] - minX) / spanX * WELD_STEPS).roundToInt().coerceIn(0, WELD_STEPS).toLong()
+            val qy = ((p[v * 3 + 1] - minY) / spanY * WELD_STEPS).roundToInt().coerceIn(0, WELD_STEPS).toLong()
+            val qz = ((p[v * 3 + 2] - minZ) / spanZ * WELD_STEPS).roundToInt().coerceIn(0, WELD_STEPS).toLong()
+            val key = (qx shl 42) or (qy shl 21) or qz
+            weldOf[v] = seen.getOrPut(key) { v }
+        }
+        return weldOf
     }
 
     // ------------------------------------------------------------- clustering
@@ -219,7 +424,11 @@ object MeshSimplifier {
     // ------------------------------------------------------------- glTF write
 
     /** Packs a mesh back into a self-contained .glb, texture included. */
-    internal fun writeGlb(mesh: ModelExporter.Mesh): ByteArray {
+    internal fun writeGlb(
+        mesh: ModelExporter.Mesh,
+        normals: FloatArray? = null,
+        tangents: FloatArray? = null,
+    ): ByteArray {
         val bin = ByteArrayOutputStream()
         fun align() { while (bin.size() % 4 != 0) bin.write(0) }
         fun putFloats(values: FloatArray): Pair<Int, Int> {
@@ -233,6 +442,8 @@ object MeshSimplifier {
 
         val (posAt, posLen) = putFloats(mesh.positions)
         val uvSlot = if (mesh.uvs.isNotEmpty()) putFloats(mesh.uvs) else null
+        val normalSlot = normals?.takeIf { it.size == mesh.vertexCount * 3 }?.let { putFloats(it) }
+        val tangentSlot = tangents?.takeIf { it.size == mesh.vertexCount * 4 }?.let { putFloats(it) }
 
         align()
         val idxAt = bin.size()
@@ -272,6 +483,8 @@ object MeshSimplifier {
 
         val posView = addView(posAt, posLen, 34962)          // ARRAY_BUFFER
         val uvView = uvSlot?.let { addView(it.first, it.second, 34962) }
+        val normalView = normalSlot?.let { addView(it.first, it.second, 34962) }
+        val tangentView = tangentSlot?.let { addView(it.first, it.second, 34962) }
         val idxView = addView(idxAt, idxLen, 34963)          // ELEMENT_ARRAY_BUFFER
         val texView = textureSlot?.let { addView(it.first, it.second) }
 
@@ -286,6 +499,20 @@ object MeshSimplifier {
             accessors += buildJsonObject {
                 put("bufferView", it); put("componentType", 5126)
                 put("count", mesh.vertexCount); put("type", "VEC2")
+            }
+            accessors.size - 1
+        }
+        val normalAccessor = normalView?.let {
+            accessors += buildJsonObject {
+                put("bufferView", it); put("componentType", 5126)
+                put("count", mesh.vertexCount); put("type", "VEC3")
+            }
+            accessors.size - 1
+        }
+        val tangentAccessor = tangentView?.let {
+            accessors += buildJsonObject {
+                put("bufferView", it); put("componentType", 5126)
+                put("count", mesh.vertexCount); put("type", "VEC4")
             }
             accessors.size - 1
         }
@@ -313,10 +540,12 @@ object MeshSimplifier {
                         add(buildJsonObject {
                             put("attributes", buildJsonObject {
                                 put("POSITION", 0)
+                                normalAccessor?.let { put("NORMAL", it) }
+                                tangentAccessor?.let { put("TANGENT", it) }
                                 uvAccessor?.let { put("TEXCOORD_0", it) }
                             })
                             put("indices", idxAccessor)
-                            if (texView != null) put("material", 0)
+                            put("material", 0)
                         })
                     })
                 })
@@ -336,22 +565,33 @@ object MeshSimplifier {
                 put("textures", buildJsonArray {
                     add(buildJsonObject { put("sampler", 0); put("source", 0) })
                 })
-                put("materials", buildJsonArray {
-                    add(buildJsonObject {
-                        put("name", "material_0")
-                        put("pbrMetallicRoughness", buildJsonObject {
-                            put("baseColorTexture", buildJsonObject { put("index", 0) })
-                            put("metallicFactor", 0.0)
-                            put("roughnessFactor", 1.0)
-                        })
-                        put("doubleSided", true)
-                    })
-                })
             }
+            // A material is always written, texture or not. A primitive with no
+            // material at all falls back to glTF's defaults, and metallicFactor
+            // defaults to 1.0 — a rough metal has no diffuse response, so the
+            // model renders dark and colourless whatever its colours say.
+            put("materials", buildJsonArray {
+                add(buildJsonObject {
+                    put("name", "material_0")
+                    put("pbrMetallicRoughness", buildJsonObject {
+                        if (texView != null) {
+                            put("baseColorTexture", buildJsonObject { put("index", 0) })
+                        }
+                        put("metallicFactor", 0.0)
+                        put("roughnessFactor", 0.85)
+                    })
+                    put("doubleSided", true)
+                })
+            })
         }
 
         return Glb.assemble(json, bin.toByteArray())
     }
 
     private const val SEARCH_STEPS = 12
+    /**
+     * Quantisation steps per axis. 2^21 - 1 keeps three axes inside one Long,
+     * and is far finer than the float noise it exists to absorb.
+     */
+    private const val WELD_STEPS = 2_097_151
 }

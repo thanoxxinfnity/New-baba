@@ -320,17 +320,23 @@ object ModelExporter {
                     }
 
                     val staging = File(outputDir, ".batch_$index").apply { mkdirs() }
+                    // The reduced copy gets its own directory. Sharing one with the
+                    // staging output made a GLB export copy the file onto itself,
+                    // which deletes it: copyTo removes the target before writing.
+                    val work = File(outputDir, ".work_$index").apply { mkdirs() }
                     try {
                         // Reduce once per model, then convert the reduced copy into
                         // every requested format — otherwise each format would pay
                         // for the same simplification again.
-                        val source = if (detail.isFull) glb else {
-                            MeshSimplifier.simplify(glb, detail, staging, scaler)
-                                .getOrElse {
-                                    failures += "${glb.name}: ${it.message}"
-                                    return@forEachIndexed
-                                }
-                        }
+                        // Always offered to the simplifier, including at Full detail:
+                        // it returns the input untouched when there is nothing to
+                        // do, and at Full it still adds the normals and the correct
+                        // metallic factor that generated models ship without.
+                        val source = MeshSimplifier.simplify(glb, detail, work, scaler, suffix = "")
+                            .getOrElse {
+                                failures += "${glb.name}: ${it.message}"
+                                return@forEachIndexed
+                            }
                         val wanted = formats.intersect(availableFormats(source).toSet())
                         if (wanted.isEmpty()) {
                             failures += "${glb.name}: none of the chosen formats apply"
@@ -344,10 +350,7 @@ object ModelExporter {
                         }
                         if (!any) return@forEachIndexed
 
-                        // The reduced intermediate is a working file, not a
-                        // deliverable, unless GLB was actually asked for.
-                        val skip = if (source !== glb && Format.GLB !in wanted) source.name else null
-                        staging.listFiles()?.filter { it.isFile && it.name != skip }?.forEach { file ->
+                        staging.listFiles()?.filter { it.isFile }?.forEach { file ->
                             out.putNextEntry(java.util.zip.ZipEntry("$folder/${file.name}"))
                             file.inputStream().use { it.copyTo(out) }
                             out.closeEntry()
@@ -355,6 +358,7 @@ object ModelExporter {
                         written++
                     } finally {
                         staging.deleteRecursively()
+                        work.deleteRecursively()
                     }
                 }
 
