@@ -76,15 +76,40 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
                 } ?: parse(reply.content, prompt)   // rethrow the real reason
             }
 
-    /** Pulls the JSON object out of a reply that may be wrapped in prose or fences. */
+    /**
+     * Pulls the JSON object out of a reply that may be wrapped in prose or fences.
+     *
+     * Deliberately no regex. The pattern this replaced used a literal `}`, which
+     * the JVM accepts and Android's ICU engine rejects outright — so every unit
+     * test passed while the feature threw "Syntax error in regexp pattern" on a
+     * real phone. Brace counting is also simply more correct: it stops at the
+     * first complete object instead of running to the last `}` in the reply.
+     */
     private fun extractJson(reply: String): String {
-        val fenced = Regex("```(?:json)?\\s*(\\{.*?})\\s*```", RegexOption.DOT_MATCHES_ALL)
-            .find(reply)?.groupValues?.get(1)
-        if (fenced != null) return fenced
         val start = reply.indexOf('{')
-        val end = reply.lastIndexOf('}')
-        if (start >= 0 && end > start) return reply.substring(start, end + 1)
-        throw Exception("The model didn't return an animation. Try describing the motion more plainly.")
+        if (start < 0) {
+            throw Exception("The model didn't return an animation. Try describing the motion more plainly.")
+        }
+
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (i in start until reply.length) {
+            val c = reply[i]
+            when {
+                escaped -> escaped = false
+                c == '\\' && inString -> escaped = true
+                c == '"' -> inString = !inString
+                inString -> Unit
+                c == '{' -> depth++
+                c == '}' -> {
+                    depth--
+                    if (depth == 0) return reply.substring(start, i + 1)
+                }
+            }
+        }
+        // Unbalanced — usually the reply was cut off mid-object.
+        throw Exception("The model's animation plan was cut off. Try again.")
     }
 
     /**
@@ -111,7 +136,30 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
             }
             line.substring(0, cut)
         }
-        return Regex(",\\s*([}\\]])").replace(withoutComments, "$1")
+        return dropTrailingCommas(withoutComments)
+    }
+
+    /** Removes a comma that sits before a closing brace or bracket. */
+    private fun dropTrailingCommas(text: String): String {
+        val out = StringBuilder(text.length)
+        var inString = false
+        var escaped = false
+        for (i in text.indices) {
+            val c = text[i]
+            if (!inString && c == ',') {
+                // Look past whitespace: a comma followed by a close is illegal JSON.
+                var j = i + 1
+                while (j < text.length && text[j].isWhitespace()) j++
+                if (j < text.length && (text[j] == '}' || text[j] == ']')) continue
+            }
+            when {
+                escaped -> escaped = false
+                c == '\\' && inString -> escaped = true
+                c == '"' -> inString = !inString
+            }
+            out.append(c)
+        }
+        return out.toString()
     }
 
     private fun parse(reply: String, prompt: String): AutoRigger.MotionSpec {

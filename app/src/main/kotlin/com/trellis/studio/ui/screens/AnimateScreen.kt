@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,13 +53,11 @@ fun AnimateScreen(
     val baked by vm.baked.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
-    var selected by remember { mutableStateOf<AnimatableModel?>(null) }
-
-    // The selected model is held by value, so refresh it when the list changes
-    // (a bake inserts a new row and would otherwise leave a stale selection).
-    LaunchedEffect(models) {
-        selected = selected?.let { current -> models.firstOrNull { it.id == current.id } }
-    }
+    // The selection is an id, not a copy of the row. Holding the object meant it
+    // had to be re-synced whenever the list re-emitted, and any gap in that
+    // re-sync shows up as the wrong model being acted on.
+    var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selected = models.firstOrNull { it.id == selectedId }
 
     LaunchedEffect(baked) {
         baked?.let { (path, name) ->
@@ -133,8 +132,8 @@ fun AnimateScreen(
                 items(models, key = { it.id }) { model ->
                     ModelRow(
                         model = model,
-                        selected = selected?.id == model.id,
-                        onClick = { selected = if (selected?.id == model.id) null else model },
+                        selected = selectedId == model.id,
+                        onClick = { selectedId = if (selectedId == model.id) null else model.id },
                         onView = { onOpenModel(model.path, model.name) },
                     )
                 }

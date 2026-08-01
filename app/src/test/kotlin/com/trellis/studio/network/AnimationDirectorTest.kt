@@ -149,6 +149,40 @@ class AnimationDirectorTest {
     }
 
     @Test
+    fun `extraction stops at the first complete object`() {
+        // Running to the last brace in the reply would swallow a second object
+        // the model tacked on, and produce unparseable text.
+        val spec = parse(
+            """
+            {"name":"First","frame":"HUMANOID","seconds":1,
+             "tracks":[{"bone":"l_thigh","axis":"x","amplitude":0.4}]}
+            Here is an alternative:
+            {"name":"Second","frame":"VEHICLE","seconds":2,"tracks":[]}
+            """.trimIndent()
+        ).getOrThrow()
+        assertEquals("First", spec.name)
+    }
+
+    @Test
+    fun `nested braces inside strings do not end the object early`() {
+        val spec = parse(
+            """{"name":"a {curly} title","frame":"HUMANOID","seconds":1,
+                "tracks":[{"bone":"l_thigh","axis":"x","amplitude":0.4}]}"""
+        ).getOrThrow()
+        assertEquals("a {curly} title", spec.name)
+    }
+
+    @Test
+    fun `a reply cut off mid object says so`() {
+        val result = parse("""{"name":"X","frame":"HUMANOID","tracks":[{"bone":"l_thigh",""")
+        assertTrue(result.isFailure)
+        assertTrue(
+            "the message should say it was truncated",
+            result.exceptionOrNull()?.message.orEmpty().contains("cut off"),
+        )
+    }
+
+    @Test
     fun `a track with no amplitude is dropped`() {
         val result = parse(
             """{"name":"X","frame":"HUMANOID","seconds":1,

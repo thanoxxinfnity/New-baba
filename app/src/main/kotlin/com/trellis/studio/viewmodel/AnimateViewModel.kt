@@ -64,19 +64,37 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
     fun consumeMessage() { _message.value = null }
     fun consumeBaked() { _baked.value = null }
 
+    /**
+     * Inspecting a model means reading its glTF header and, for the suggestion,
+     * its vertex positions. The list re-emits on every database write, so the
+     * results are cached per file — otherwise every save re-read every model.
+     */
+    private val inspected = mutableMapOf<String, Pair<Long, AnimatableModel>>()
+
     private fun GenerationEntity.toAnimatable(): AnimatableModel? {
         val path = modelPath ?: return null
         val file = File(path)
         if (!file.exists() || file.length() == 0L) return null
-        return AnimatableModel(
+
+        val stamp = file.lastModified()
+        inspected[path]?.let { (cachedStamp, cached) ->
+            if (cachedStamp == stamp) return cached.copy(id = id, name = displayName(file))
+        }
+
+        val fresh = AnimatableModel(
             id = id,
-            name = prompt?.takeIf { it.isNotBlank() } ?: file.name,
+            name = displayName(file),
             path = path,
             sizeLabel = FileExport.humanSize(file.length()),
             existingClips = AnimationBaker.clipNames(file).filter { it.isNotBlank() },
             suggestedRig = AutoRigger.suggest(file),
         )
+        inspected[path] = stamp to fresh
+        return fresh
     }
+
+    private fun GenerationEntity.displayName(file: File) =
+        prompt?.takeIf { it.isNotBlank() } ?: file.name
 
     /**
      * Bakes [clip] into [model] and registers the result as its own gallery entry,

@@ -348,13 +348,21 @@ fun VoiceScreen(
     // ---- Voice picker -----------------------------------------------------
     if (showVoiceSheet) {
         ModalBottomSheet(onDismissRequest = { showVoiceSheet = false }, containerColor = SurfDark) {
+            // The list used to be a fillMaxSize child of a fixed-fraction Column,
+            // which leaves its layout and its touch targets disagreeing while the
+            // sheet is still settling — a tap then lands on the row above the one
+            // being pointed at. Weighting it inside a bounded Column keeps the
+            // drawn rows and the hit targets in the same place.
             Column(Modifier.fillMaxHeight(0.75f)) {
                 Text(
                     "Voices",
                     style = MaterialTheme.typography.titleLarge.copy(brush = NeonBrush),
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                 )
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                LazyColumn(
+                    Modifier.fillMaxWidth().weight(1f),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                ) {
                     if (state.voices.any { it.isCloned }) {
                         item {
                             SectionLabel("Your cloned voices")
