@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.util.FileExport
+import com.trellis.studio.util.AndroidTextureScaler
+import com.trellis.studio.util.MeshSimplifier
 import com.trellis.studio.util.ModelExporter
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -77,8 +79,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Exports every selected 3D model into a single .zip. */
-    fun exportSelected(items: List<GenerationEntity>, formats: List<ModelExporter.Format>) =
-        viewModelScope.launch {
+    fun exportSelected(
+        items: List<GenerationEntity>,
+        formats: List<ModelExporter.Format>,
+        detail: MeshSimplifier.Detail = MeshSimplifier.Detail.FULL,
+    ) = viewModelScope.launch {
             if (_exporting.value != null) return@launch
             val chosen = selectedModels(items)
             if (chosen.isEmpty()) {
@@ -92,6 +97,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 formats = formats,
                 outputDir = FileExport.outputDir(getApplication()),
                 zipName = "void_models_${chosen.size}",
+                detail = detail,
+                scaler = AndroidTextureScaler,
                 onProgress = { p ->
                     _exporting.value = "Exporting ${p.done + 1} of ${p.total} · ${p.current}"
                 },

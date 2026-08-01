@@ -5,6 +5,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +27,7 @@ import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
+import com.trellis.studio.util.MeshSimplifier
 import com.trellis.studio.util.ModelExporter
 import com.trellis.studio.viewmodel.GalleryViewModel
 
@@ -174,9 +177,9 @@ fun GalleryScreen(
             BatchFormatSheet(
                 modelCount = selectedModelCount,
                 skipped = selection.size - selectedModelCount,
-                onExport = { formats ->
+                onExport = { formats, detail ->
                     showFormats = false
-                    vm.exportSelected(allItems, formats)
+                    vm.exportSelected(allItems, formats, detail)
                 },
             )
         }
@@ -229,9 +232,10 @@ private fun SelectionBar(
 private fun BatchFormatSheet(
     modelCount: Int,
     skipped: Int,
-    onExport: (List<ModelExporter.Format>) -> Unit,
+    onExport: (List<ModelExporter.Format>, MeshSimplifier.Detail) -> Unit,
 ) {
     val chosen = remember { mutableStateListOf(ModelExporter.Format.GLB) }
+    var detail by remember { mutableStateOf(MeshSimplifier.Detail.FULL) }
 
     Column(Modifier.padding(bottom = 28.dp)) {
         Text(
@@ -248,6 +252,48 @@ private fun BatchFormatSheet(
         )
         Spacer(Modifier.height(10.dp))
 
+        // Same budget question as the single-model export, applied to all of them.
+        Text(
+            "Size",
+            style = MaterialTheme.typography.labelLarge,
+            color = Cyan,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            MeshSimplifier.Detail.entries.forEach { d ->
+                FilterChip(
+                    selected = detail == d,
+                    onClick = { detail = d },
+                    label = { Text(d.label, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Purple40,
+                        selectedLabelColor = TextPrimary,
+                        containerColor = CardDark,
+                        labelColor = TextSecondary,
+                    ),
+                )
+            }
+        }
+        Text(
+            detail.note,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDisabled,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+        )
+        HorizontalDivider(color = BorderDark, thickness = 0.5.dp,
+            modifier = Modifier.padding(vertical = 8.dp))
+
+        Text(
+            "Formats",
+            style = MaterialTheme.typography.labelLarge,
+            color = Cyan,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+        )
         ModelExporter.Format.entries.forEach { fmt ->
             val on = fmt in chosen
             ListItem(
@@ -269,7 +315,7 @@ private fun BatchFormatSheet(
 
         Spacer(Modifier.height(8.dp))
         Button(
-            onClick = { onExport(chosen.toList()) },
+            onClick = { onExport(chosen.toList(), detail) },
             enabled = chosen.isNotEmpty(),
             colors = ButtonDefaults.buttonColors(containerColor = Purple40),
             shape = RoundedCornerShape(16.dp),

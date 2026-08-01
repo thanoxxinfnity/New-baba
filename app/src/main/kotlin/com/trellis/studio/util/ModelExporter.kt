@@ -290,6 +290,9 @@ object ModelExporter {
         formats: List<Format>,
         outputDir: File,
         zipName: String = "void_models",
+        /** Triangle and texture budget applied to each model before converting. */
+        detail: MeshSimplifier.Detail = MeshSimplifier.Detail.FULL,
+        scaler: MeshSimplifier.TextureScaler? = null,
         onProgress: suspend (BatchProgress) -> Unit = {},
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
@@ -318,20 +321,33 @@ object ModelExporter {
 
                     val staging = File(outputDir, ".batch_$index").apply { mkdirs() }
                     try {
-                        val wanted = formats.intersect(availableFormats(glb).toSet())
+                        // Reduce once per model, then convert the reduced copy into
+                        // every requested format — otherwise each format would pay
+                        // for the same simplification again.
+                        val source = if (detail.isFull) glb else {
+                            MeshSimplifier.simplify(glb, detail, staging, scaler)
+                                .getOrElse {
+                                    failures += "${glb.name}: ${it.message}"
+                                    return@forEachIndexed
+                                }
+                        }
+                        val wanted = formats.intersect(availableFormats(source).toSet())
                         if (wanted.isEmpty()) {
                             failures += "${glb.name}: none of the chosen formats apply"
                             return@forEachIndexed
                         }
                         var any = false
                         wanted.forEach { format ->
-                            export(glb, format, staging)
+                            export(source, format, staging)
                                 .onSuccess { any = true }
                                 .onFailure { failures += "${glb.name} (${format.label}): ${it.message}" }
                         }
                         if (!any) return@forEachIndexed
 
-                        staging.listFiles()?.filter { it.isFile }?.forEach { file ->
+                        // The reduced intermediate is a working file, not a
+                        // deliverable, unless GLB was actually asked for.
+                        val skip = if (source !== glb && Format.GLB !in wanted) source.name else null
+                        staging.listFiles()?.filter { it.isFile && it.name != skip }?.forEach { file ->
                             out.putNextEntry(java.util.zip.ZipEntry("$folder/${file.name}"))
                             file.inputStream().use { it.copyTo(out) }
                             out.closeEntry()

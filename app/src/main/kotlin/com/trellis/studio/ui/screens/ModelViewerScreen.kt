@@ -3,6 +3,8 @@ package com.trellis.studio.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,6 +21,8 @@ import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.AnimationBaker
 import com.trellis.studio.util.FileExport
+import com.trellis.studio.util.AndroidTextureScaler
+import com.trellis.studio.util.MeshSimplifier
 import com.trellis.studio.util.ModelExporter
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.Scene
@@ -72,12 +76,16 @@ fun ModelViewerScreen(
     var showExport by remember { mutableStateOf(false) }
     var showAnimate by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<String?>(null) }
+    // Asked before every export, the way Meshy and Tripo do it.
+    var detail by remember { mutableStateOf(MeshSimplifier.Detail.FULL) }
+    var size by remember { mutableStateOf<MeshSimplifier.Size?>(null) }
     var clipNames by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val file = remember(currentPath) { File(currentPath) }
     val hasAnimation = clipNames.isNotEmpty()
 
     LaunchedEffect(currentPath) {
+        size = withContext(Dispatchers.IO) { MeshSimplifier.measure(file) }
         loading = true
         error = null
         nodes.clear()
@@ -365,7 +373,14 @@ fun ModelViewerScreen(
                     color = TextSecondary,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
+                DetailPicker(
+                    current = detail,
+                    original = size,
+                    onPick = { detail = it },
+                )
+                HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
+                Spacer(Modifier.height(6.dp))
 
                 exporting?.let { BusyRow(it) }
 
@@ -388,8 +403,18 @@ fun ModelViewerScreen(
                         },
                         modifier = Modifier.clickable(enabled = exporting == null) {
                             scope.launch {
+                                val dir = FileExport.outputDir(context)
+                                val source = if (detail.isFull) file else {
+                                    exporting = "Reducing to ${detail.label}…"
+                                    MeshSimplifier.simplify(file, detail, dir, AndroidTextureScaler)
+                                        .getOrElse { e ->
+                                            exporting = null
+                                            snackbar.showSnackbar(e.message ?: "Could not reduce the model")
+                                            return@launch
+                                        }
+                                }
                                 exporting = "Writing ${fmt.label}…"
-                                ModelExporter.export(file, fmt, FileExport.outputDir(context))
+                                ModelExporter.export(source, fmt, dir)
                                     .onSuccess { out ->
                                         exporting = null
                                         showExport = false
@@ -417,8 +442,18 @@ fun ModelViewerScreen(
                     },
                     modifier = Modifier.clickable(enabled = exporting == null) {
                         scope.launch {
+                            val dir = FileExport.outputDir(context)
+                            val source = if (detail.isFull) file else {
+                                exporting = "Reducing to ${detail.label}…"
+                                MeshSimplifier.simplify(file, detail, dir, AndroidTextureScaler)
+                                    .getOrElse { e ->
+                                        exporting = null
+                                        snackbar.showSnackbar(e.message ?: "Could not reduce the model")
+                                        return@launch
+                                    }
+                            }
                             exporting = "Packing every format…"
-                            ModelExporter.exportAll(file, FileExport.outputDir(context))
+                            ModelExporter.exportAll(source, dir)
                                 .onSuccess { zip ->
                                     exporting = null
                                     showExport = false
@@ -434,6 +469,64 @@ fun ModelViewerScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * Triangle-and-texture budget, chosen before the format.
+ *
+ * The current cost is spelled out because "Low" means nothing without knowing
+ * what the model actually is — a 2k-triangle prop is already below every
+ * preset, and reducing it further would only make it worse.
+ */
+@Composable
+private fun DetailPicker(
+    current: MeshSimplifier.Detail,
+    original: MeshSimplifier.Size?,
+    onPick: (MeshSimplifier.Detail) -> Unit,
+) {
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Size", style = MaterialTheme.typography.labelLarge, color = Cyan)
+            Spacer(Modifier.width(8.dp))
+            original?.let {
+                Text(
+                    "now ${"%,d".format(it.triangles)} triangles · ${FileExport.humanSize(it.bytes)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextDisabled,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            MeshSimplifier.Detail.entries.forEach { d ->
+                // A preset above what the model already has would do nothing, so
+                // it is shown as unavailable rather than silently no-op.
+                val pointless = original != null && !d.isFull &&
+                    original.triangles <= d.targetTriangles && d.textureSize >= 1024
+                FilterChip(
+                    selected = current == d,
+                    enabled = !pointless,
+                    onClick = { onPick(d) },
+                    label = { Text(d.label, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Purple40,
+                        selectedLabelColor = TextPrimary,
+                        containerColor = CardDark,
+                        labelColor = TextSecondary,
+                    ),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            current.note,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDisabled,
+        )
     }
 }
 
