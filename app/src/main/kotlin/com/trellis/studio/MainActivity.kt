@@ -200,6 +200,7 @@ fun MainContent() {
                         GalleryScreen(
                             onMenu = openDrawer,
                             onOpenModel = { path, name -> navController.openViewer(path, name) },
+                            onOpenImage = { path, name -> navController.openImage(path, name) },
                             onOpenVoice = { go("voice") },
                             onOpenSettings = { go("settings") },
                         )
@@ -214,6 +215,23 @@ fun MainContent() {
                         )
                     }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
+
+                    // The image viewer existed but had no route, so tapping a
+                    // generated image in the gallery did nothing.
+                    composable(
+                        route = "$ROUTE_IMAGE/{path}/{name}",
+                        arguments = listOf(
+                            navArgument("path") { type = NavType.StringType },
+                            navArgument("name") { type = NavType.StringType },
+                        ),
+                    ) { entry ->
+                        ImageViewerScreen(
+                            imagePath = entry.arguments?.getString("path").orEmpty().decodeArg(),
+                            title = entry.arguments?.getString("name").orEmpty().decodeArg()
+                                .ifBlank { "Image" },
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
 
                     composable(
                         route = "$ROUTE_VIEWER/{path}/{name}",
@@ -238,6 +256,10 @@ fun MainContent() {
 
 private fun NavHostController.openViewer(path: String, name: String) {
     navigate("$ROUTE_VIEWER/${path.encodeArg()}/${name.encodeArg()}")
+}
+
+private fun NavHostController.openImage(path: String, name: String) {
+    navigate("$ROUTE_IMAGE/${path.encodeArg()}/${name.encodeArg()}")
 }
 
 // File paths contain "/", which would break route matching — encode both args.

@@ -139,9 +139,18 @@ fun AnimateScreen(
 
                 item {
                     Spacer(Modifier.height(6.dp))
+                    PromptBox(
+                        enabled = selected != null && busy == null,
+                        subject = selected?.name,
+                        onGenerate = { text -> selected?.let { vm.animateFromPrompt(it, text) } },
+                    )
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                item {
                     Text(
-                        if (selected == null) "2 · Pick a model above to unlock the motion"
-                        else "2 · Choose the motion",
+                        if (selected == null) "Or pick a ready-made motion"
+                        else "Or pick a ready-made motion",
                         style = MaterialTheme.typography.labelLarge,
                         color = if (selected == null) TextDisabled else TextSecondary,
                     )
@@ -282,6 +291,84 @@ private fun ModelRow(
         IconButton(onClick = onView) {
             Icon(Icons.Default.PlayCircleOutline, "Preview", tint = TextSecondary,
                 modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Describe the motion in words; the LLM turns it into bone keyframes. */
+@Composable
+private fun PromptBox(
+    enabled: Boolean,
+    subject: String?,
+    onGenerate: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(if (enabled) Modifier.glass(glow = Cyan) else Modifier.glass(fill = GlassFill.copy(alpha = 0.4f)))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.AutoAwesome, null, tint = if (enabled) Cyan else TextDisabled,
+                modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "2 · Describe the motion",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) TextPrimary else TextDisabled,
+            )
+        }
+        Text(
+            if (subject == null) "Pick a model above first."
+            else "Say what \"$subject\" should do — the AI works out which bones move.",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDisabled,
+        )
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            enabled = enabled,
+            placeholder = {
+                Text("walk forward and wag its tail", color = TextDisabled,
+                    style = MaterialTheme.typography.bodySmall)
+            },
+            textStyle = MaterialTheme.typography.bodyMedium,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Cyan,
+                unfocusedBorderColor = BorderDark,
+                focusedTextColor = TextPrimary,
+                unfocusedTextColor = TextPrimary,
+                cursorColor = Cyan,
+            ),
+            maxLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Concrete openers beat a blank box: they show the level of detail
+            // that actually maps onto bones.
+            listOf("walk", "run and wave", "spin the wheels").forEach { hint ->
+                AssistChip(
+                    onClick = { text = hint },
+                    enabled = enabled,
+                    label = { Text(hint, style = MaterialTheme.typography.labelSmall) },
+                    colors = AssistChipDefaults.assistChipColors(labelColor = TextSecondary),
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            FilledTonalButton(
+                onClick = { onGenerate(text); text = "" },
+                enabled = enabled && text.isNotBlank(),
+                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Purple40),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.AutoAwesome, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Animate", color = TextPrimary)
+            }
         }
     }
 }

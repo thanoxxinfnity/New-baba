@@ -33,41 +33,87 @@ import kotlin.math.sqrt
  */
 object AutoRigger {
 
+    /** The skeleton shape. A written prompt picks one of these directly. */
+    enum class Frame(val label: String) {
+        HUMANOID("Two legs"),
+        QUADRUPED("Four legs"),
+        VEHICLE("Wheels"),
+    }
+
     enum class Rig(
         val label: String,
         val note: String,
         val caveat: String,
         val seconds: Float,
+        val frame: Frame,
     ) {
         HUMANOID_WALK(
             "Walk (two legs)",
             "Hips, spine, arms and legs — a stepping walk cycle",
             "Fits a person-shaped model standing upright. A crouched or seated pose will bend oddly.",
-            1.2f,
+            1.2f, Frame.HUMANOID,
         ),
         HUMANOID_RUN(
             "Run (two legs)",
             "Same skeleton, faster stride with more lean",
             "Fits a person-shaped model standing upright.",
-            0.75f,
+            0.75f, Frame.HUMANOID,
         ),
         QUADRUPED_WALK(
             "Walk (four legs)",
             "Spine plus four legs — diagonal gait for animals",
             "Fits an animal standing on four legs, longer than it is tall.",
-            1.4f,
+            1.4f, Frame.QUADRUPED,
         ),
         VEHICLE_WHEELS(
             "Spinning wheels",
             "Finds the wheels and turns them on their axles",
             "Needs four visible wheels near the corners. The wheels are cut out of the body by shape, so a heavily skirted car may drag a little bodywork.",
-            2f,
+            2f, Frame.VEHICLE,
         );
 
-        val isVehicle get() = this == VEHICLE_WHEELS
+        val isVehicle get() = frame == Frame.VEHICLE
     }
 
+    /**
+     * A motion described from outside — one entry per bone the caller wants to
+     * move. This is what a written prompt turns into.
+     */
+    data class Track(
+        val bone: String,
+        /** "x" pitch, "y" yaw, "z" roll. */
+        val axis: String,
+        /** Peak rotation in radians. */
+        val amplitude: Float,
+        /** Where in the loop this bone peaks, 0..1. */
+        val phase: Float = 0f,
+        /** "sine" swings both ways, "half" only one way, "spin" turns full circles. */
+        val wave: String = "sine",
+        /** Constant rotation added on top, radians. */
+        val offset: Float = 0f,
+        /** Repeats per loop; 2 makes a bone move twice per stride. */
+        val cycles: Float = 1f,
+    )
+
+    data class MotionSpec(
+        val name: String,
+        val frame: Frame,
+        val seconds: Float,
+        val tracks: List<Track>,
+        /** Up-and-down travel of the whole body, in model units. */
+        val bob: Float = 0f,
+        val bobCycles: Float = 2f,
+    )
+
     private const val SAMPLES_PER_SECOND = 20
+    // Guard rails for a described motion: a bad number should make the model look
+    // dull, never make it explode.
+    private const val MIN_SECONDS = 0.4f
+    private const val MAX_SECONDS = 8f
+    private const val MAX_KEYS = 240
+    private const val MAX_TRACKS = 40
+    private const val MAX_RADIANS = 2.2f
+    private const val MAX_BOB = 0.12f
     private const val MAX_INFLUENCES = 4
     private const val SKIN_ROOT = "void_rig_root"
 
@@ -90,30 +136,50 @@ object AutoRigger {
      * Writes a new .glb with a skeleton, skin weights and [rig]'s motion.
      * The original mesh data is untouched; everything is appended.
      */
-    suspend fun rig(glb: File, rig: Rig, outputDir: File): Result<File> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                require(glb.exists() && glb.length() > 20) { "Model file is missing or empty." }
-                outputDir.mkdirs()
+    suspend fun rig(
+        glb: File,
+        rig: Rig,
+        outputDir: File,
+        /** Supply this to drive the bones from a written description instead. */
+        spec: MotionSpec? = null,
+    ): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(glb.exists() && glb.length() > 20) { "Model file is missing or empty." }
+            outputDir.mkdirs()
 
-                val (root, bin) = Glb.split(glb.readBytes())
-                val mesh = readMesh(root, bin)
-                    ?: throw IllegalArgumentException("This model has no mesh to rig.")
+            val (root, bin) = Glb.split(glb.readBytes())
+            val mesh = readMesh(root, bin)
+                ?: throw IllegalArgumentException("This model has no mesh to rig.")
 
-                val bounds = Bounds(mesh.positions)
-                val skeleton = when (rig) {
-                    Rig.HUMANOID_WALK, Rig.HUMANOID_RUN -> humanoid(bounds)
-                    Rig.QUADRUPED_WALK -> quadruped(bounds)
-                    Rig.VEHICLE_WHEELS -> vehicle(mesh.positions, bounds)
-                }
-
-                val weights = skinWeights(mesh.positions, skeleton, rig)
-                val clips = motion(skeleton, rig)
-                val out = File(outputDir, "${glb.nameWithoutExtension}_${rig.name.lowercase()}.glb")
-                out.writeBytes(inject(root, bin, mesh, skeleton, weights, clips, rig))
-                out
+            val frame = spec?.frame ?: rig.frame
+            val bounds = Bounds(mesh.positions)
+            val skeleton = when (frame) {
+                Frame.HUMANOID -> humanoid(bounds)
+                Frame.QUADRUPED -> quadruped(bounds)
+                Frame.VEHICLE -> vehicle(mesh.positions, bounds)
             }
+
+            val weights = skinWeights(mesh.positions, skeleton, frame)
+            val clips = spec?.let { custom(skeleton, it) } ?: motion(skeleton, rig)
+            val label = spec?.name ?: rig.label
+            val suffix = (spec?.name ?: rig.name).lowercase()
+                .replace(Regex("[^a-z0-9]+"), "_").trim('_').take(28).ifBlank { "motion" }
+            val out = File(outputDir, "${glb.nameWithoutExtension}_$suffix.glb")
+            out.writeBytes(inject(root, bin, mesh, skeleton, weights, clips, label))
+            out
         }
+    }
+
+    /** Bone names a given frame will create, so a prompt can be told what exists. */
+    fun boneNames(frame: Frame): List<String> {
+        val unit = Bounds(floatArrayOf(-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f))
+        return when (frame) {
+            Frame.HUMANOID -> humanoid(unit).bones.map { it.name }
+            Frame.QUADRUPED -> quadruped(unit).bones.map { it.name }
+            // Wheel bones only exist once wheels are actually found on a model.
+            Frame.VEHICLE -> listOf("body", "l_front_wheel", "r_front_wheel", "l_rear_wheel", "r_rear_wheel")
+        }
+    }
 
     // ------------------------------------------------------------------ mesh
 
@@ -413,7 +479,7 @@ object AutoRigger {
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
 
-    private fun skinWeights(positions: FloatArray, s: Skeleton, rig: Rig): Weights {
+    private fun skinWeights(positions: FloatArray, s: Skeleton, frame: Frame): Weights {
         val count = positions.size / 3
         val joints = ByteArray(count * 4)
         val values = FloatArray(count * 4)
@@ -421,7 +487,7 @@ object AutoRigger {
         for (v in 0 until count) {
             val x = positions[v * 3]; val y = positions[v * 3 + 1]; val z = positions[v * 3 + 2]
 
-            if (rig.isVehicle) {
+            if (frame == Frame.VEHICLE) {
                 // Wheels have to turn as solid objects: a smooth falloff would
                 // smear the tyre into the wing. Each vertex is either in a wheel
                 // or it is body, with nothing in between.
@@ -476,6 +542,84 @@ object AutoRigger {
     private fun quatX(a: Float) = floatArrayOf(sin(a / 2f), 0f, 0f, cos(a / 2f))
     private fun quatY(a: Float) = floatArrayOf(0f, sin(a / 2f), 0f, cos(a / 2f))
     private fun quatZ(a: Float) = floatArrayOf(0f, 0f, sin(a / 2f), cos(a / 2f))
+
+    /**
+     * Turns a described motion into keyframes.
+     *
+     * Anything the description asks for that this skeleton does not have is
+     * dropped rather than guessed at, and every amplitude is clamped, so a
+     * confused description produces a tame animation instead of a mangled one.
+     */
+    private fun custom(s: Skeleton, spec: MotionSpec): Motion {
+        val seconds = spec.seconds.coerceIn(MIN_SECONDS, MAX_SECONDS)
+        val count = (seconds * SAMPLES_PER_SECOND).toInt().coerceIn(4, MAX_KEYS) + 1
+        val times = FloatArray(count) { it * seconds / (count - 1) }
+        val tau = (2 * PI).toFloat()
+        val tracks = mutableMapOf<Int, FloatArray>()
+
+        spec.tracks.take(MAX_TRACKS).forEach { t ->
+            // Wheel bones are named per corner, so "wheel" is allowed to mean all
+            // of them — the obvious thing to write for a car.
+            val targets = if (t.bone.equals("wheels", true) || t.bone.equals("wheel", true)) {
+                s.bones.indices.filter { s.bones[it].name.endsWith("wheel") }
+            } else {
+                s.bones.indices.filter { s.bones[it].name.equals(t.bone, true) }
+            }
+            if (targets.isEmpty()) return@forEach
+
+            val amplitude = t.amplitude.coerceIn(-MAX_RADIANS, MAX_RADIANS)
+            val offset = t.offset.coerceIn(-MAX_RADIANS, MAX_RADIANS)
+            val cycles = t.cycles.coerceIn(0.25f, 6f)
+            val phase = t.phase
+
+            targets.forEach { bone ->
+                val existing = tracks[bone]
+                val out = existing ?: FloatArray(count * 4)
+                for (i in 0 until count) {
+                    val p = times[i] / seconds
+                    val theta = tau * (p * cycles + phase)
+                    val angle = offset + when (t.wave.lowercase()) {
+                        // A full turn: what a wheel or a propeller does.
+                        "spin" -> amplitude * tau * p * cycles
+                        // One-directional: a knee folds back but never forward.
+                        "half" -> amplitude * max(0f, sin(theta))
+                        else -> amplitude * sin(theta)
+                    }
+                    val q = when (t.axis.lowercase()) {
+                        "y" -> quatY(angle)
+                        "z" -> quatZ(angle)
+                        else -> quatX(angle)
+                    }
+                    if (existing == null) q.copyInto(out, i * 4)
+                    else multiply(existing, i * 4, q)
+                }
+                tracks[bone] = out
+            }
+        }
+
+        val bob = spec.bob.coerceIn(-MAX_BOB, MAX_BOB)
+        val rootMove = if (bob == 0f || tracks.isEmpty()) null else FloatArray(count * 3).also { out ->
+            val cycles = spec.bobCycles.coerceIn(0.5f, 6f)
+            for (i in 0 until count) {
+                out[i * 3 + 1] = bob * sin(tau * (times[i] / seconds) * cycles)
+            }
+        }
+        return Motion(times, tracks, rootMove)
+    }
+
+    /** Composes a second rotation onto a key already written at [at]. */
+    private fun multiply(target: FloatArray, at: Int, q: FloatArray) {
+        val ax = target[at]; val ay = target[at + 1]; val az = target[at + 2]; val aw = target[at + 3]
+        val bx = q[0]; val by = q[1]; val bz = q[2]; val bw = q[3]
+        var x = aw * bx + ax * bw + ay * bz - az * by
+        var y = aw * by - ax * bz + ay * bw + az * bx
+        var z = aw * bz + ax * by - ay * bx + az * bw
+        var w = aw * bw - ax * bx - ay * by - az * bz
+        // glTF requires unit quaternions on a rotation channel.
+        val length = sqrt(x * x + y * y + z * z + w * w)
+        if (length > 1e-6f) { x /= length; y /= length; z /= length; w /= length } else { x = 0f; y = 0f; z = 0f; w = 1f }
+        target[at] = x; target[at + 1] = y; target[at + 2] = z; target[at + 3] = w
+    }
 
     private fun motion(s: Skeleton, rig: Rig): Motion {
         val count = (rig.seconds * SAMPLES_PER_SECOND).toInt().coerceAtLeast(4) + 1
@@ -563,7 +707,7 @@ object AutoRigger {
         skeleton: Skeleton,
         weights: Weights,
         motion: Motion,
-        rig: Rig,
+        label: String,
     ): ByteArray {
         val extra = ByteArrayOutputStream()
         fun align() { while (extra.size() % 4 != 0) extra.write(0) }
@@ -732,7 +876,7 @@ object AutoRigger {
 
         val animations = (root["animations"]?.jsonArray ?: JsonArray(emptyList())).toMutableList()
         animations += buildJsonObject {
-            put("name", rig.label)
+            put("name", label)
             put("samplers", JsonArray(samplers))
             put("channels", JsonArray(channels))
         }

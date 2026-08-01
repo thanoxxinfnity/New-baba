@@ -48,6 +48,11 @@ object ModelExporter {
                 val target = File(outputDir, "$stem.${format.ext}")
 
                 if (format == Format.GLB) {
+                    // A blind copy would happily hand back a truncated or corrupt
+                    // file renamed .glb, which only fails later in the engine.
+                    val header = ByteArray(4)
+                    val read = glb.inputStream().use { it.read(header) }
+                    require(read == 4 && String(header) == "glTF") { "Not a GLB file." }
                     glb.copyTo(target, overwrite = true)
                     return@runCatching target
                 }
@@ -269,6 +274,96 @@ object ModelExporter {
             zip
         }
     }
+
+    /** Progress while a batch runs: which item, and how many there are. */
+    data class BatchProgress(val done: Int, val total: Int, val current: String)
+
+    /**
+     * Exports many models into one .zip — each in its own folder so filenames
+     * from different models cannot collide.
+     *
+     * Failures are collected instead of aborting: one unreadable model should
+     * not cost the user the other thirty.
+     */
+    suspend fun exportBatch(
+        models: List<File>,
+        formats: List<Format>,
+        outputDir: File,
+        zipName: String = "void_models",
+        onProgress: suspend (BatchProgress) -> Unit = {},
+    ): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(models.isNotEmpty()) { "Nothing selected to export." }
+            require(formats.isNotEmpty()) { "Pick at least one format." }
+
+            outputDir.mkdirs()
+            val zip = File(outputDir, "${zipName.trim().ifBlank { "void_models" }}.zip")
+            val failures = mutableListOf<String>()
+            var written = 0
+
+            java.util.zip.ZipOutputStream(zip.outputStream().buffered()).use { out ->
+                val usedNames = mutableSetOf<String>()
+                models.forEachIndexed { index, glb ->
+                    onProgress(BatchProgress(index, models.size, glb.nameWithoutExtension))
+                    if (!glb.exists() || glb.length() == 0L) {
+                        failures += "${glb.name}: file is missing"
+                        return@forEachIndexed
+                    }
+
+                    // Two models can share a name, so the folder is made unique.
+                    var folder = safeName(glb.nameWithoutExtension)
+                    if (!usedNames.add(folder)) {
+                        folder = "${folder}_${index + 1}".also { usedNames.add(it) }
+                    }
+
+                    val staging = File(outputDir, ".batch_$index").apply { mkdirs() }
+                    try {
+                        val wanted = formats.intersect(availableFormats(glb).toSet())
+                        if (wanted.isEmpty()) {
+                            failures += "${glb.name}: none of the chosen formats apply"
+                            return@forEachIndexed
+                        }
+                        var any = false
+                        wanted.forEach { format ->
+                            export(glb, format, staging)
+                                .onSuccess { any = true }
+                                .onFailure { failures += "${glb.name} (${format.label}): ${it.message}" }
+                        }
+                        if (!any) return@forEachIndexed
+
+                        staging.listFiles()?.filter { it.isFile }?.forEach { file ->
+                            out.putNextEntry(java.util.zip.ZipEntry("$folder/${file.name}"))
+                            file.inputStream().use { it.copyTo(out) }
+                            out.closeEntry()
+                        }
+                        written++
+                    } finally {
+                        staging.deleteRecursively()
+                    }
+                }
+
+                // A note in the archive beats a toast the user has already dismissed.
+                if (failures.isNotEmpty()) {
+                    out.putNextEntry(java.util.zip.ZipEntry("SKIPPED.txt"))
+                    out.write(
+                        ("These models could not be exported:\n\n" + failures.joinToString("\n"))
+                            .toByteArray()
+                    )
+                    out.closeEntry()
+                }
+            }
+
+            onProgress(BatchProgress(models.size, models.size, "done"))
+            if (written == 0) {
+                zip.delete()
+                throw Exception(failures.firstOrNull() ?: "Nothing could be exported.")
+            }
+            zip
+        }
+    }
+
+    private fun safeName(name: String) =
+        name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(48).ifBlank { "model" }
 
     private fun le16(b: ByteArray, i: Int) = (b[i].toInt() and 0xff) or ((b[i + 1].toInt() and 0xff) shl 8)
     private fun le32(b: ByteArray, i: Int) =

@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
+import com.trellis.studio.data.prefs.AppPrefs
+import com.trellis.studio.network.AnimationDirector
 import com.trellis.studio.util.AnimationBaker
 import com.trellis.studio.util.AutoRigger
 import com.trellis.studio.util.FileExport
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -38,6 +41,8 @@ data class AnimatableModel(
 class AnimateViewModel(app: Application) : AndroidViewModel(app) {
 
     private val db = AppDatabase.get(app)
+    private val prefs = AppPrefs(app)
+    private val director = AnimationDirector()
 
     // Each row is stat'ed and its glTF header parsed, so the mapping is kept off
     // the main thread — Room's flow would otherwise hand it straight to the UI.
@@ -100,6 +105,48 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
             .onFailure {
                 _busy.value = null
                 _message.value = it.message ?: "Could not add the animation."
+            }
+    }
+
+    /**
+     * Animates the model from a written description: the LLM choreographs which
+     * bones move and how, and the rigger plays it against a skeleton fitted to
+     * this particular mesh.
+     */
+    fun animateFromPrompt(model: AnimatableModel, prompt: String) = viewModelScope.launch {
+        if (_busy.value != null) return@launch
+        val apiKey = prefs.nvidiaKey.first()
+        if (apiKey.isBlank()) {
+            _message.value = "Add your NVIDIA API key in Settings."
+            return@launch
+        }
+
+        _busy.value = "Working out the motion…"
+        val llm = prefs.selectedLlm.first()
+        director.choreograph(apiKey, llm, prompt, subject = model.name)
+            .onSuccess { spec ->
+                _busy.value = "Building the skeleton…"
+                val dir = File(getApplication<Application>().filesDir, "models3d").apply { mkdirs() }
+                // The preset is only a fallback shape here; the spec picks the frame.
+                AutoRigger.rig(File(model.path), AutoRigger.Rig.HUMANOID_WALK, dir, spec)
+                    .onSuccess { file ->
+                        val name = "${model.name} · ${spec.name}"
+                        runCatching {
+                            db.generationDao().insert(
+                                GenerationEntity(type = "3d", prompt = name, modelPath = file.absolutePath)
+                            )
+                        }
+                        _busy.value = null
+                        _baked.value = file.absolutePath to name
+                    }
+                    .onFailure {
+                        _busy.value = null
+                        _message.value = it.message ?: "Could not animate this model."
+                    }
+            }
+            .onFailure {
+                _busy.value = null
+                _message.value = it.message ?: "Could not work out that motion."
             }
     }
 
