@@ -111,6 +111,44 @@ class AnimationDirectorTest {
     }
 
     @Test
+    fun `json with comments still parses`() {
+        // Models copy the annotated style they are shown, so a reply with `//`
+        // notes inside the object has to survive.
+        val spec = parse(
+            """
+            {
+              "name": "Walk",         // a title
+              "frame": "HUMANOID",    // two legs
+              "seconds": 1.2,
+              "tracks": [
+                {"bone": "l_thigh", "axis": "x", "amplitude": 0.45},  // left leg
+                {"bone": "r_thigh", "axis": "x", "amplitude": 0.45, "phase": 0.5}
+              ]
+            }
+            """.trimIndent()
+        ).getOrThrow()
+        assertEquals(2, spec.tracks.size)
+    }
+
+    @Test
+    fun `trailing commas still parse`() {
+        val spec = parse(
+            """{"name":"X","frame":"VEHICLE","seconds":2,
+                "tracks":[{"bone":"wheels","axis":"x","amplitude":1,"wave":"spin",},],}"""
+        ).getOrThrow()
+        assertEquals(1, spec.tracks.size)
+    }
+
+    @Test
+    fun `a url inside a string is not mistaken for a comment`() {
+        val spec = parse(
+            """{"name":"see https://example.com/x","frame":"HUMANOID","seconds":1,
+                "tracks":[{"bone":"l_thigh","axis":"x","amplitude":0.4}]}"""
+        ).getOrThrow()
+        assertTrue(spec.name.contains("https://example.com/x"))
+    }
+
+    @Test
     fun `a track with no amplitude is dropped`() {
         val result = parse(
             """{"name":"X","frame":"HUMANOID","seconds":1,

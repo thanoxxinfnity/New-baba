@@ -42,9 +42,39 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
             ChatTurn("user", "Model: \"$subject\"\nAnimation wanted: \"${prompt.trim()}\""),
         )
 
-        return nim.chat(apiKey, model, turns, maxTokens = 1600, temperature = 0.4)
-            .mapCatching { reply -> parse(reply.content, prompt) }
+        val first = attempt(apiKey, model, turns, prompt)
+        if (first.isSuccess || model == FALLBACK_MODEL) return first
+
+        // Whichever model is picked for chat also gets asked for the animation,
+        // and not all of them can hold a JSON shape: measured across the whole
+        // catalogue, a reasoning model spent its entire budget thinking and
+        // returned empty content. Rather than blame the user for their model
+        // choice, ask one that reliably answers in JSON.
+        return attempt(apiKey, FALLBACK_MODEL, turns, prompt).recoverCatching { retryError ->
+            throw Exception(
+                "\"$model\" didn't return a usable animation, and the fallback failed too: " +
+                    "${retryError.message}"
+            )
+        }
     }
+
+    private suspend fun attempt(
+        apiKey: String,
+        model: String,
+        turns: List<ChatTurn>,
+        prompt: String,
+    ): Result<AutoRigger.MotionSpec> =
+        // Reasoning models spend tokens before they write anything, so the budget
+        // has to cover the thinking as well as the answer.
+        nim.chat(apiKey, model, turns, maxTokens = MAX_TOKENS, temperature = 0.4)
+            .mapCatching { reply ->
+                // Some models put the JSON only in their reasoning trace, and some
+                // return prose in `content` with the real answer behind it.
+                val candidates = listOfNotNull(reply.content, reply.reasoning)
+                candidates.firstNotNullOfOrNull { text ->
+                    runCatching { parse(text, prompt) }.getOrNull()
+                } ?: parse(reply.content, prompt)   // rethrow the real reason
+            }
 
     /** Pulls the JSON object out of a reply that may be wrapped in prose or fences. */
     private fun extractJson(reply: String): String {
@@ -57,8 +87,37 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
         throw Exception("The model didn't return an animation. Try describing the motion more plainly.")
     }
 
+    /**
+     * Strips the two things models emit that strict JSON forbids: `//` comments
+     * and trailing commas. Both are common because the example in the system
+     * prompt is annotated, and models copy the style they are shown.
+     */
+    private fun tidy(raw: String): String {
+        val withoutComments = raw.lineSequence().joinToString("\n") { line ->
+            var inString = false
+            var escaped = false
+            var cut = line.length
+            for (i in line.indices) {
+                val c = line[i]
+                when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = !inString
+                    // Only outside a string: a URL inside one must survive.
+                    !inString && c == '/' && i + 1 < line.length && line[i + 1] == '/' -> {
+                        cut = i; return@joinToString line.substring(0, cut)
+                    }
+                }
+            }
+            line.substring(0, cut)
+        }
+        return Regex(",\\s*([}\\]])").replace(withoutComments, "$1")
+    }
+
     private fun parse(reply: String, prompt: String): AutoRigger.MotionSpec {
-        val root = runCatching { json.parseToJsonElement(extractJson(reply)).jsonObject }
+        val raw = extractJson(reply)
+        val root = runCatching { json.parseToJsonElement(raw).jsonObject }
+            .recoverCatching { json.parseToJsonElement(tidy(raw)).jsonObject }
             .getOrElse { throw Exception("The model's animation plan was unreadable. Try again.") }
 
         val frame = when (root["frame"]?.jsonPrimitive?.content?.uppercase()) {
@@ -111,6 +170,15 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
     }
 
     private companion object {
+        /** Enough for a reasoning model to think and still answer. */
+        const val MAX_TOKENS = 4096
+
+        /**
+         * Asked when the chosen model cannot produce JSON. Picked by measurement,
+         * not preference: it returned valid JSON on every attempt.
+         */
+        const val FALLBACK_MODEL = "meta/llama-3.1-8b-instruct"
+
         // The bone lists are spelled out because the model has to pick from them
         // exactly; anything invented gets dropped on the way back in.
         val SYSTEM_PROMPT = """
@@ -130,25 +198,21 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
               VEHICLE   bones: body, l_front_wheel, r_front_wheel,
                         l_rear_wheel, r_rear_wheel, or "wheels" for all four
 
-            Shape:
-            {
-              "name": "short title",
-              "frame": "HUMANOID" | "QUADRUPED" | "VEHICLE",
-              "seconds": 0.4 to 8,
-              "bob": 0 to 0.1,          // whole body rising and falling
-              "bobCycles": 1 to 4,
-              "tracks": [
-                {
-                  "bone": "l_thigh",
-                  "axis": "x",          // x = swing forward/back, y = turn left/right, z = tilt sideways
-                  "amplitude": 0.45,    // radians, keep under 1.2 for limbs
-                  "phase": 0.0,         // 0..1, offsets this bone within the loop
-                  "wave": "sine",       // sine = both ways, half = one way only, spin = full turns
-                  "offset": 0.0,        // constant rotation added on top
-                  "cycles": 1           // repeats per loop
-                }
-              ]
-            }
+            Reply with exactly this shape, and no comments inside the JSON:
+            {"name":"short title","frame":"HUMANOID","seconds":1.2,"bob":0.02,"bobCycles":2,
+             "tracks":[{"bone":"l_thigh","axis":"x","amplitude":0.45,"phase":0.0,"wave":"sine","offset":0.0,"cycles":1}]}
+
+            What each field means:
+              frame      HUMANOID, QUADRUPED or VEHICLE
+              seconds    length of one loop, 0.4 to 8
+              bob        whole body rising and falling, 0 to 0.1
+              bone       must come from the list above
+              axis       x = swing forward/back, y = turn left/right, z = tilt sideways
+              amplitude  radians; keep under 1.2 for limbs
+              phase      0..1, offsets this bone within the loop
+              wave       sine = both ways, half = one way only, spin = full turns
+              offset     constant rotation added on top
+              cycles     repeats per loop
 
             Rules that make it read as real motion:
             - Opposite limbs are half a loop apart: phase 0 on one side, 0.5 on the other.
