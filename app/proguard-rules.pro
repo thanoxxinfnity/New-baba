@@ -47,3 +47,17 @@
 
 # Room entities are read reflectively by the generated DAOs.
 -keep class com.trellis.studio.data.entity.** { *; }
+
+# ---------------------------------------------------------------------------
+# Agent services
+#
+# The framework instantiates these by their manifest class name and calls into
+# their lifecycle methods, so the class names and members must survive R8. An
+# accessibility service that gets renamed or has its overrides stripped binds
+# but does nothing — which the system then reports as "not working". Keeping
+# them outright removes that whole failure mode from release builds.
+# ---------------------------------------------------------------------------
+-keep class * extends android.accessibilityservice.AccessibilityService { *; }
+-keep class com.trellis.studio.service.AutomationService { *; }
+-keep class com.trellis.studio.service.FloatingOverlayService { *; }
+-keep class com.trellis.studio.service.GenerationService { *; }

@@ -142,11 +142,34 @@ fun AgentScreen(onMenu: () -> Unit = {}) {
                 }
             }
 
-            if (!ready) {
-                PermissionBanner(
-                    onEnable = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                )
-            }
+            // Master setup: shown until all three are granted, then it collapses
+            // to a single line so it stays out of the way once the agent is ready.
+            val micOk = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            SetupCard(
+                accessibilityOk = accessibilityOk,
+                overlayOk = overlayOk,
+                micOk = micOk,
+                onAccessibility = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                onOverlay = {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    )
+                },
+                onMic = { micPermission.launch(Manifest.permission.RECORD_AUDIO) },
+                onAppInfo = {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    )
+                },
+            )
 
             // Conversation
             if (transcript.isEmpty()) {
@@ -286,24 +309,118 @@ private fun MessageBubble(m: AgentBrain.Message) {
     }
 }
 
+/**
+ * The one place to switch everything on. Each capability shows its live state
+ * and a button that opens the exact setting for it. Once all three are on it
+ * shrinks to a single "ready" line, and it always carries the MIUI/Xiaomi note
+ * because "Not working. Tap for info." is the failure most users hit there.
+ */
 @Composable
-private fun PermissionBanner(onEnable: () -> Unit) {
-    Row(
+private fun SetupCard(
+    accessibilityOk: Boolean,
+    overlayOk: Boolean,
+    micOk: Boolean,
+    onAccessibility: () -> Unit,
+    onOverlay: () -> Unit,
+    onMic: () -> Unit,
+    onAppInfo: () -> Unit,
+) {
+    val allOk = accessibilityOk && overlayOk && micOk
+    var showXiaomi by remember { mutableStateOf(false) }
+
+    Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-            .glass(glow = Amber).padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .glass(glow = if (allOk) Teal else Amber).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Icons.Default.Accessibility, null, tint = Amber, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Accessibility off", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (allOk) Icons.Default.CheckCircle else Icons.Default.PowerSettingsNew,
+                null, tint = if (allOk) Teal else Amber, modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
             Text(
-                "Turn on VOID's accessibility service so it can tap and type for you.",
-                color = TextSecondary, style = MaterialTheme.typography.labelSmall,
+                if (allOk) "Agent ready" else "Turn the agent on",
+                color = TextPrimary, style = MaterialTheme.typography.labelLarge,
             )
         }
-        TextButton(onClick = onEnable) {
-            Text("Enable", color = Cyan, style = MaterialTheme.typography.labelLarge)
+
+        if (!allOk) {
+            SetupRow(
+                "Accessibility service", "Lets the agent tap, type and scroll — required",
+                accessibilityOk, onAccessibility,
+            )
+            SetupRow(
+                "Draw over other apps", "The floating bubble for use over other apps",
+                overlayOk, onOverlay,
+            )
+            SetupRow(
+                "Microphone", "So you can speak commands",
+                micOk, onMic,
+            )
+
+            // The Xiaomi case, folded away so it does not shout at everyone.
+            TextButton(
+                onClick = { showXiaomi = !showXiaomi },
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Icon(
+                    if (showXiaomi) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null, tint = Cyan, modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "It says \"Not working\" / Xiaomi, Oppo, Vivo?",
+                    color = Cyan, style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            if (showXiaomi) {
+                Text(
+                    "Some phones block accessibility for sideloaded apps. Fix it once:\n" +
+                        "1. Open App info below → tap the ⋮ menu → \"Allow restricted settings\".\n" +
+                        "2. In Autostart / Startup, allow VOID to start.\n" +
+                        "3. Back in Accessibility, if VOID shows \"Not working\", turn it OFF " +
+                        "then ON again — a reinstall leaves the old entry stale.",
+                    color = TextSecondary, style = MaterialTheme.typography.labelSmall,
+                )
+                OutlinedButton(
+                    onClick = onAppInfo,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Icon(Icons.Default.Info, null, modifier = Modifier.size(15.dp), tint = Cyan)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Open App info", color = Cyan, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupRow(label: String, note: String, granted: Boolean, onGrant: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (granted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+            null, tint = if (granted) Teal else Amber, modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+            Text(note, color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+        }
+        if (!granted) {
+            FilledTonalButton(
+                onClick = onGrant,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Purple40),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Turn on", color = TextPrimary, style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }
