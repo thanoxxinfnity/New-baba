@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Agent automation: draw the floating overlay, and run its socket as a
+         special-use foreground service. The accessibility capability itself is
+         granted by binding the service below, not by a uses-permission tag. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <!-- Android 11+ package visibility: without this the app cannot bind to the
          system text-to-speech engine and TTS never initialises. -->
     <queries>
@@ -45,6 +51,30 @@
             android:name=".service.GenerationService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Accessibility automation core. Bound by the system once the user
+             enables it in Settings > Accessibility. -->
+        <service
+            android:name=".service.AutomationService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Floating control bubble drawn over other apps. -->
+        <service
+            android:name=".service.FloatingOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating automation control overlay" />
+        </service>
 
         <!-- Lets generated files (.zip, .glb, images) be shared out of the sandbox. -->
         <provider
