@@ -111,7 +111,22 @@ object AgentBrain {
             return
         }
 
+        // Bring up the floating bubble so the process stays alive once VOID goes
+        // to the background, and so progress is visible over the app being driven.
+        // No-ops without the overlay permission.
+        AgentController.showOverlay(app)
+
+        // The agent is launched from inside VOID, so the first thing on screen is
+        // VOID's own chat. Left alone the model just taps its own buttons — Speak,
+        // Chat, Terminal — and never touches a real app. Leaving to the home
+        // screen first is what makes it operate the phone like a person would.
+        if (service.currentPackage() == app.packageName) {
+            service.goHome()
+            delay(LAUNCH_SETTLE_MS)
+        }
+
         var steps = 0
+        val recent = ArrayDeque<String>()
         while (steps < MAX_STEPS) {
             steps++
 
@@ -149,6 +164,19 @@ object AgentBrain {
                 else -> {
                     val result = execute(service, action)
                     add(Role.ACTION, "${describe(action)} → $result")
+
+                    // Stuck-detection: the same action over and over — usually a
+                    // failing tap the model keeps retrying — is a loop, not
+                    // progress. Bail and hand back to the user instead of burning
+                    // through every step doing nothing.
+                    val signature = "${action.type}|${action.text}|${action.query}|$result"
+                    recent.addLast(signature)
+                    if (recent.size > STUCK_WINDOW) recent.removeFirst()
+                    if (recent.size == STUCK_WINDOW && recent.all { it == signature }) {
+                        say("I'm stuck repeating the same step and not getting anywhere. Tell me what to do differently, or open the app you meant and I'll take it from there.")
+                        return
+                    }
+
                     // A short beat for the UI to settle before the next screen
                     // read. Opening a whole app needs longer than a tap, so the
                     // pause is matched to the action rather than fixed.
@@ -156,7 +184,7 @@ object AgentBrain {
                 }
             }
         }
-        say("I've taken $MAX_STEPS steps — stopping so I don't loop. Tell me if you'd like me to carry on.")
+        say("That's $MAX_STEPS steps done. I'll pause here — say \"carry on\" and I'll keep going.")
     }
 
     /** Builds the model input: the rules, the conversation, and the live screen. */
@@ -175,13 +203,24 @@ object AgentBrain {
             }
         }
 
-        turns += ChatTurn("user", screenReport(service))
+        turns += ChatTurn("user", screenReport(app, service))
         return turns
     }
 
     /** A compact description of what is on screen right now. */
-    private fun screenReport(service: AutomationService): String {
+    private fun screenReport(app: Context, service: AutomationService): String {
         val pkg = service.currentPackage() ?: "unknown"
+
+        // Never let the model operate VOID itself. If we are looking at our own
+        // app, do not even list its buttons — tell the model to leave. This is
+        // what stops it tapping Speak/Chat/Terminal in a loop.
+        if (pkg == app.packageName) {
+            return "You are on VOID's own screen (the app running you). Do NOT tap " +
+                "anything here. If the task names an app to open, do it NOW with " +
+                "{\"action\":\"launch\",\"query\":\"<app name>\"}. Otherwise go to the " +
+                "home screen with {\"action\":\"home\"}. Give the next action as JSON."
+        }
+
         // Fewer, most-relevant elements keep the prompt short so the model
         // answers faster; 28 covers a normal screen's interactive parts.
         val elements = service.snapshot(limit = 28)
@@ -372,17 +411,30 @@ object AgentBrain {
         return s.length
     }
 
-    private const val MAX_STEPS = 25
+    private const val MAX_STEPS = 40
     // A shorter window keeps the prompt small, which lowers first-token latency —
     // the recent past is what matters for the next tap, not the whole run.
     private const val MAX_HISTORY = 14
     private const val SETTLE_MS = 250L
     private const val LAUNCH_SETTLE_MS = 650L
+    /** Identical action this many times in a row means it is stuck, not working. */
+    private const val STUCK_WINDOW = 3
 
     private val SYSTEM_PROMPT = """
         You are VOID Agent, controlling a real Android phone for the user through an
         accessibility service. You can genuinely tap, type, scroll and open apps —
         this is not a simulation.
+
+        You operate OTHER apps — Chrome, WhatsApp, Settings, Godot, whatever the
+        user names. You are launched from inside the VOID app (package
+        com.trellis.studio). NEVER operate VOID itself: do not tap its buttons
+        (Chat, Create, Terminal, Speak, Run, Send, menu, etc.) and do not type into
+        its boxes. If the screen is VOID, your only moves are "launch" the target
+        app or "home".
+
+        To OPEN an app, ALWAYS use the launch action with the app's name:
+        {"action":"launch","query":"chrome"}. Never open an app by typing its name
+        into a search box or a terminal — launch is the only correct way.
 
         Each turn you are given the CURRENT SCREEN: the app package and a list of
         elements with their on-screen text and tap coordinates. Decide the SINGLE
