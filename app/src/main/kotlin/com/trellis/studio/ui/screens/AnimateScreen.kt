@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,7 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,6 +56,7 @@ fun AnimateScreen(
     val busy by vm.busy.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val baked by vm.baked.collectAsStateWithLifecycle()
+    val rigged by vm.rigged.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
     // The selection is an id, not a copy of the row. Holding the object meant it
@@ -72,6 +77,18 @@ fun AnimateScreen(
             snackbar.showSnackbar(it)
             vm.consumeMessage()
         }
+    }
+
+    rigged?.let { result ->
+        RiggedSheet(
+            result = result,
+            onDismiss = { vm.consumeRigged() },
+            onOpen = {
+                vm.consumeRigged()
+                onOpenModel(result.file.absolutePath, "${selected?.name ?: result.file.name} · rigged")
+            },
+            onShare = { FileExport.share(context, result.file, "model/gltf-binary") },
+        )
     }
 
     Scaffold(
@@ -141,6 +158,16 @@ fun AnimateScreen(
 
                 item {
                     Spacer(Modifier.height(6.dp))
+                    AddBonesBox(
+                        model = selected,
+                        enabled = selected != null && busy == null &&
+                            selected.shape != MeshAnalyzer.Shape.SOLID,
+                        onAddBones = { selected?.let { vm.addBones(it) } },
+                    )
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                item {
                     PromptBox(
                         enabled = selected != null && busy == null,
                         subject = selected?.name,
@@ -223,16 +250,18 @@ fun AnimateScreen(
                             }
                             Text(
                                 "Generated models arrive as one fused shell — no bones, no separate " +
-                                    "parts. \"Skeleton\" builds a rig from the model's own proportions " +
-                                    "and weights every vertex to it, so legs and wheels move on their " +
-                                    "own. \"Whole-object\" moves the model as one piece.",
+                                    "parts. Nothing can animate a leg on such a model, in this app or " +
+                                    "anywhere else, because there is no joint to turn. \"Add bones\" " +
+                                    "measures the mesh, fits a skeleton to the limbs it finds and " +
+                                    "weights every vertex to it.",
                                 color = TextSecondary,
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Text(
-                                "Either way it is real glTF animation — not a video, not a preview. " +
-                                    "Unity, Unreal, Godot, Blender and three.js play it straight from " +
-                                    "the .glb, and so does the viewer here.",
+                                "That file is standard glTF skinning, so you can write the motion " +
+                                    "yourself in three.js, <model-viewer>, Unity, Unreal, Godot or " +
+                                    "Blender. The options below bake a clip into it instead, if you " +
+                                    "would rather not write any.",
                                 color = TextSecondary,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -315,6 +344,249 @@ private fun ModelRow(
     }
 }
 
+/**
+ * The bones-only action.
+ *
+ * A generated model is one fused shell with no joints, and no renderer can
+ * invent them — so nothing you write in code can make a leg swing on its own.
+ * This puts the skeleton into the file and stops there, which is what makes the
+ * model animatable anywhere else.
+ */
+@Composable
+private fun AddBonesBox(
+    model: AnimatableModel?,
+    enabled: Boolean,
+    onAddBones: () -> Unit,
+) {
+    val solid = model != null && model.shape == MeshAnalyzer.Shape.SOLID
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (enabled) Modifier.glass(glow = Pink).neonBorder(RoundedCornerShape(20.dp))
+                else Modifier.glass(fill = GlassFill.copy(alpha = 0.4f))
+            )
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Accessibility, null,
+                tint = if (enabled) Pink else TextDisabled,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "2 · Add bones",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) TextPrimary else TextDisabled,
+            )
+        }
+        Text(
+            when {
+                model == null -> "Pick a model above first."
+                solid -> "This model measured as one solid shape — there are no legs " +
+                    "or wheels for bones to bend. Use a whole-object clip below."
+                else -> "Measures the mesh, fits a skeleton to the ${model.shape.label} it " +
+                    "found and skins every vertex to it. No clip is baked in — you get " +
+                    "the joints, and you write the motion in code."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (solid) Amber else TextDisabled,
+        )
+        Text(
+            "For three.js, <model-viewer>, Unity, Unreal, Godot and Blender: they can " +
+                "all rotate a joint, but none of them can add one.",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextDisabled,
+        )
+        Button(
+            onClick = onAddBones,
+            enabled = enabled,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Purple40,
+                disabledContainerColor = CardHigh,
+            ),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                Icons.Default.Accessibility, null, modifier = Modifier.size(16.dp),
+                tint = if (enabled) TextPrimary else TextDisabled,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Add bones (rig only)",
+                color = if (enabled) TextPrimary else TextDisabled,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * What came out: the bone names, and the code that drives them.
+ *
+ * The names are not decoration — a joint is addressed by name in every engine,
+ * so without them the rigged file is a guessing game.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun RiggedSheet(
+    result: AutoRigger.Rigged,
+    onDismiss: () -> Unit,
+    onOpen: () -> Unit,
+    onShare: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val snippet = remember(result) { threeJsSnippet(result) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = SurfDark) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 18.dp, bottom = 28.dp)
+                .heightIn(max = 560.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CheckCircle, null, tint = Teal, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "${result.bones.size} bones added",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                )
+            }
+            Text(
+                "Skeleton: ${result.frame.label}. The mesh is skinned to these joints, " +
+                    "so rotating one moves the geometry around it. No animation clip is " +
+                    "in the file — that is yours to write.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+            )
+
+            Text("Joint names", style = MaterialTheme.typography.labelLarge, color = Cyan)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                result.bones.forEach { bone ->
+                    AssistChip(
+                        onClick = { clipboard.setText(AnnotatedString(bone)) },
+                        label = {
+                            Text(bone, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        },
+                        colors = AssistChipDefaults.assistChipColors(labelColor = TextSecondary),
+                    )
+                }
+            }
+
+            Text("Drive it in code", style = MaterialTheme.typography.labelLarge, color = Cyan)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CardHigh)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(12.dp),
+            ) {
+                Text(
+                    snippet,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = TextSecondary,
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { clipboard.setText(AnnotatedString(snippet)) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(15.dp),
+                        tint = TextSecondary)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy code", color = TextSecondary,
+                        style = MaterialTheme.typography.labelMedium)
+                }
+                FilledTonalButton(
+                    onClick = onShare,
+                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = Purple40),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size(15.dp),
+                        tint = TextPrimary)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Export .glb", color = TextPrimary,
+                        style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            TextButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+                Text("Open in viewer", color = Cyan, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+/** A runnable starting point, written against the joints this model actually has. */
+private fun threeJsSnippet(result: AutoRigger.Rigged): String {
+    val bones = result.bones
+    fun pick(vararg contains: String) =
+        bones.firstOrNull { name -> contains.all { name.contains(it) } }
+
+    val body = when (result.frame) {
+        AutoRigger.Frame.VEHICLE -> {
+            val wheels = bones.filter { it.endsWith("wheel") }
+            buildString {
+                appendLine("  // wheels turn on X; 6 rad/s ~= a fast roll")
+                wheels.forEach { appendLine("  bones['$it'].rotation.x = -t * 6;") }
+            }
+        }
+        AutoRigger.Frame.HUMANOID -> {
+            val lt = pick("l_", "thigh") ?: "l_thigh"
+            val rt = pick("r_", "thigh") ?: "r_thigh"
+            val lk = pick("l_", "knee") ?: "l_knee"
+            """
+            |  // a stride: legs swing opposite, knees fold on the back half
+            |  bones['$lt'].rotation.x = 0.45 * Math.sin(t * 5);
+            |  bones['$rt'].rotation.x = -0.45 * Math.sin(t * 5);
+            |  bones['$lk'].rotation.x = -0.55 * Math.max(0, Math.sin(t * 5 + 1.6));
+            """.trimMargin()
+        }
+        AutoRigger.Frame.QUADRUPED -> {
+            val lf = pick("l_front", "upper") ?: "l_front_upper"
+            val rr = pick("r_rear", "upper") ?: "r_rear_upper"
+            val rf = pick("r_front", "upper") ?: "r_front_upper"
+            val lr = pick("l_rear", "upper") ?: "l_rear_upper"
+            """
+            |  // diagonal gait: front-left moves with rear-right
+            |  const s = Math.sin(t * 4);
+            |  bones['$lf'].rotation.x = 0.4 * s;
+            |  bones['$rr'].rotation.x = 0.4 * s;
+            |  bones['$rf'].rotation.x = -0.4 * s;
+            |  bones['$lr'].rotation.x = -0.4 * s;
+            """.trimMargin()
+        }
+    }
+
+    return """
+    |import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    |
+    |const gltf = await new GLTFLoader().loadAsync('model.glb');
+    |scene.add(gltf.scene);
+    |
+    |const clock = new THREE.Clock();
+    |const bones = {};
+    |gltf.scene.traverse(o => { if (o.isBone) bones[o.name] = o; });
+    |
+    |renderer.setAnimationLoop(() => {
+    |  const t = clock.getElapsedTime();
+    |$body
+    |  renderer.render(scene, camera);
+    |});
+    """.trimMargin()
+}
+
 /** Describe the motion in words; the LLM turns it into bone keyframes. */
 @Composable
 private fun PromptBox(
@@ -335,7 +607,7 @@ private fun PromptBox(
                 modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                "2 · Describe the motion",
+                "3 · Or describe the motion",
                 style = MaterialTheme.typography.labelLarge,
                 color = if (enabled) TextPrimary else TextDisabled,
             )

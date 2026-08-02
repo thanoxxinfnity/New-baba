@@ -21,6 +21,7 @@ import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.AnimationBaker
+import com.trellis.studio.util.AutoRigger
 import com.trellis.studio.util.FileExport
 import com.trellis.studio.util.AndroidTextureScaler
 import com.trellis.studio.util.MeshSimplifier
@@ -317,6 +318,61 @@ fun ModelViewerScreen(
                 Spacer(Modifier.height(10.dp))
 
                 exporting?.let { BusyRow(it) }
+
+                // Bones first: a clip moves the model as one piece, but only a
+                // skeleton lets anything else animate it afterwards.
+                ListItem(
+                    headlineContent = { Text("Add bones (rig only)", color = TextPrimary) },
+                    supportingContent = {
+                        Text(
+                            "Measures the mesh, fits a skeleton to its limbs and skins it. " +
+                                "No clip — drive the joints from code.",
+                            color = TextDisabled,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                    leadingContent = {
+                        Icon(Icons.Default.Accessibility, null, tint = Cyan, modifier = Modifier.size(20.dp))
+                    },
+                    modifier = Modifier.clickable(enabled = exporting == null) {
+                        scope.launch {
+                            exporting = "Measuring the model and placing bones…"
+                            val dir = File(context.filesDir, "models3d").apply { mkdirs() }
+                            AutoRigger.addBones(file, dir)
+                                .onSuccess { rigged ->
+                                    val named = "${currentName.substringBefore(" · ")} · rigged"
+                                    runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            AppDatabase
+                                                .get(context.applicationContext as android.app.Application)
+                                                .generationDao()
+                                                .insert(
+                                                    GenerationEntity(
+                                                        type = "3d",
+                                                        prompt = named,
+                                                        modelPath = rigged.file.absolutePath,
+                                                    )
+                                                )
+                                        }
+                                    }
+                                    exporting = null
+                                    showAnimate = false
+                                    currentName = named
+                                    currentPath = rigged.file.absolutePath
+                                    snackbar.showSnackbar(
+                                        "${rigged.bones.size} bones added: " +
+                                            rigged.bones.take(3).joinToString(", ") + "…"
+                                    )
+                                }
+                                .onFailure { e ->
+                                    exporting = null
+                                    snackbar.showSnackbar(e.message ?: "Could not add bones")
+                                }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = SurfDark),
+                )
+                HorizontalDivider(color = BorderDark)
 
                 AnimationBaker.Clip.entries.forEach { clip ->
                     ListItem(

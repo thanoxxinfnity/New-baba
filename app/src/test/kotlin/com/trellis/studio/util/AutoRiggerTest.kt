@@ -121,6 +121,85 @@ class AutoRiggerTest {
         )
     }
 
+    /**
+     * The bones-only path is the deliverable on its own: an engine can animate
+     * anything once the mesh is bound to joints, but it cannot create joints. So
+     * the file has to carry a complete, valid skin with no clip in it.
+     */
+    @Test
+    fun `bones are added with no animation clip`() = runBlocking {
+        val source = temp.newFile("bare.glb").apply { writeBytes(bipedGlb()) }
+        val result = AutoRigger.addBones(source, temp.newFolder("bare")).getOrThrow()
+        val g = Rigged(result.file.readBytes())
+
+        assertEquals("the file length must match the header", result.file.length().toInt(), g.declaredLength)
+        // An empty animations array is invalid glTF, so the key must be absent
+        // rather than present and empty.
+        assertTrue("a rig-only file carries no clip", !g.hasAnimations)
+        assertTrue("no channels either", g.animatedNodes.isEmpty())
+
+        assertTrue("the skeleton must have joints", g.joints.isNotEmpty())
+        assertEquals("the bone names are what code addresses", g.joints.size, result.bones.size)
+        result.bones.forEachIndexed { i, name -> assertEquals(name, g.jointName(i)) }
+        assertEquals("the mesh must reference the skin", 0, g.skinOnMesh)
+        assertEquals("one inverse bind matrix per joint", g.joints.size, g.inverseBind.size / 16)
+
+        g.jointIndices.forEach {
+            assertTrue("joint index $it is out of range", it in g.joints.indices)
+        }
+        for (v in 0 until g.vertexCount) {
+            val sum = (0 until 4).sumOf { g.weights[v * 4 + it].toDouble() }
+            assertTrue("weights on vertex $v sum to $sum", abs(sum - 1.0) < 1e-3)
+        }
+        // Without a clip nothing ever moves the joints, so an unskinned-looking
+        // model here would mean the skin itself is wrong.
+        assertTrue("the bind pose must be exact, drifted ${g.bindPoseDrift()}", g.bindPoseDrift() < 1e-4)
+
+        assertEquals(AutoRigger.Frame.HUMANOID, result.frame)
+        // The failure this guards against: a leg bone bound to nothing, so the
+        // rig reads as complete and the leg never moves when code rotates it.
+        listOf("l_thigh", "l_knee", "r_thigh", "r_knee").forEach { name ->
+            val bone = result.bones.indexOf(name)
+            assertTrue("$name is missing from the skeleton", bone >= 0)
+            val owned = (0 until g.vertexCount).count { v ->
+                (0 until 4).any { g.jointIndices[v * 4 + it] == bone && g.weights[v * 4 + it] > 0.1f }
+            }
+            assertTrue("$name owns no vertices, so rotating it does nothing", owned > 0)
+        }
+    }
+
+    @Test
+    fun `the shape decides the skeleton without being told`() = runBlocking {
+        val car = temp.newFile("bones_car.glb").apply { writeBytes(carGlb()) }
+        val rigged = AutoRigger.addBones(car, temp.newFolder("bones_car")).getOrThrow()
+
+        assertEquals(AutoRigger.Frame.VEHICLE, rigged.frame)
+        assertEquals(
+            "four wheels should each get a bone",
+            4, rigged.bones.count { it.endsWith("wheel") },
+        )
+        // A bone nothing is weighted to is a bone that does nothing when rotated,
+        // which is how a rig looks correct in the file and dead in the engine.
+        val g = Rigged(rigged.file.readBytes())
+        rigged.bones.indices.filter { rigged.bones[it].endsWith("wheel") }.forEach { bone ->
+            val owned = (0 until g.vertexCount).count { v ->
+                (0 until 4).any { g.jointIndices[v * 4 + it] == bone && g.weights[v * 4 + it] > 0.1f }
+            }
+            assertTrue("${rigged.bones[bone]} owns no vertices", owned > 0)
+        }
+    }
+
+    @Test
+    fun `a shape with no limbs is refused rather than given a spine`() = runBlocking {
+        val slab = temp.newFile("bones_slab.glb").apply { writeBytes(slabGlb()) }
+        val result = AutoRigger.addBones(slab, temp.newFolder("bones_slab"))
+        assertTrue("a featureless slab has nothing to bend", result.isFailure)
+        assertTrue(
+            "the failure should say why",
+            result.exceptionOrNull()?.message.orEmpty().contains("nothing for bones to bend"),
+        )
+    }
+
     @Test
     fun `proportions pick a sensible rig`() {
         val tall = temp.newFile("tall.glb").apply { writeBytes(figureGlb()) }
@@ -159,8 +238,13 @@ class AutoRiggerTest {
         val skinOnMesh = nodes.first { it.jsonObject.containsKey("mesh") }
             .jsonObject["skin"]!!.jsonPrimitive.int
 
-        val animatedNodes: List<Int> = json["animations"]!!.jsonArray[0].jsonObject["channels"]!!
-            .jsonArray.map { it.jsonObject["target"]!!.jsonObject["node"]!!.jsonPrimitive.int }
+        /** Empty when no clip was baked — bones-only output has none by design. */
+        val animatedNodes: List<Int> = json["animations"]?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("channels")?.jsonArray
+            ?.map { it.jsonObject["target"]!!.jsonObject["node"]!!.jsonPrimitive.int }
+            ?: emptyList()
+
+        val hasAnimations = json.containsKey("animations")
 
         fun jointName(jointIndex: Int) =
             nodes[joints[jointIndex]].jsonObject["name"]!!.jsonPrimitive.content
@@ -271,6 +355,42 @@ class AutoRiggerTest {
             }
         }
         return pointCloudGlb(points.toFloatArray())
+    }
+
+    /**
+     * A torso on two real legs. [figureGlb] is a helix, which measures as one
+     * solid shape — fine for checking glTF output, useless for checking that
+     * bones land on limbs.
+     */
+    private fun bipedGlb(): ByteArray {
+        val p = mutableListOf<Float>()
+        listOf(-0.12f, 0.12f).forEach { lx ->
+            var y = -0.5f
+            while (y <= 0.05f) {
+                // Filled, not a hollow ring: a real leg has geometry at every
+                // radius, and an outline can slice into two arcs.
+                for (ring in 1..4) {
+                    val r = 0.06f * ring / 4f
+                    for (i in 0 until 20) {
+                        val a = i / 20f * 2f * Math.PI.toFloat()
+                        p += lx + r * cos(a)
+                        p += y
+                        p += r * sin(a)
+                    }
+                }
+                y += 0.02f
+            }
+        }
+        var y = 0.05f
+        while (y <= 0.5f) {
+            for (ix in 0..12) for (iz in 0..8) {
+                p += -0.18f + 0.36f * ix / 12f
+                p += y
+                p += -0.10f + 0.20f * iz / 8f
+            }
+            y += 0.03f
+        }
+        return pointCloudGlb(p.toFloatArray())
     }
 
     /** Flat and featureless: no round corner clusters anywhere. */

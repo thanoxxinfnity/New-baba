@@ -142,23 +142,9 @@ object AutoRigger {
         spec: MotionSpec? = null,
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            require(glb.exists() && glb.length() > 20) { "Model file is missing or empty." }
-            outputDir.mkdirs()
-
-            val (root, bin) = Glb.split(glb.readBytes())
-            val mesh = readMesh(root, bin)
-                ?: throw IllegalArgumentException("This model has no mesh to rig.")
-
+            val (root, bin, mesh, analysis) = open(glb, outputDir)
             val frame = spec?.frame ?: rig.frame
-            // Measure the model before touching it. Bones placed on guessed
-            // positions is what made rigging damage models instead of animating
-            // them; this is the step that reads the actual geometry.
-            val analysis = MeshAnalyzer.analyse(mesh.positions)
-            val skeleton = when (frame) {
-                Frame.HUMANOID -> humanoid(analysis)
-                Frame.QUADRUPED -> quadruped(analysis)
-                Frame.VEHICLE -> vehicle(analysis)
-            }
+            val skeleton = build(frame, analysis)
 
             val weights = skinWeights(mesh.positions, skeleton, frame, analysis)
             val clips = spec?.let { custom(skeleton, it) } ?: motion(skeleton, rig)
@@ -169,6 +155,83 @@ object AutoRigger {
             out.writeBytes(inject(root, bin, mesh, skeleton, weights, clips, label))
             out
         }
+    }
+
+    /** A model that now carries a skeleton, and what that skeleton contains. */
+    data class Rigged(
+        val file: File,
+        val frame: Frame,
+        /** In glTF joint order — these are the node names to drive from code. */
+        val bones: List<String>,
+    )
+
+    /**
+     * Adds bones and skin weights and nothing else: no baked clip.
+     *
+     * This is the part that has to happen in the file. An engine can animate
+     * anything once the geometry is bound to joints — three.js, `<model-viewer>`,
+     * Unity, Godot all rotate a joint node and the mesh follows — but none of
+     * them can invent joints for a fused TRELLIS shell. So the deliverable here
+     * is the skeleton itself, and the motion is left to whoever writes the code.
+     *
+     * The frame is measured, not asked for: [MeshAnalyzer] has already decided
+     * whether this is a biped, a quadruped or a vehicle, and the bones go on the
+     * limbs it found.
+     */
+    suspend fun addBones(
+        glb: File,
+        outputDir: File,
+        /** Overrides the measured shape when the user disagrees with it. */
+        frame: Frame? = null,
+    ): Result<Rigged> = withContext(Dispatchers.IO) {
+        runCatching {
+            val (root, bin, mesh, analysis) = open(glb, outputDir)
+            val chosen = frame ?: when (analysis.shape) {
+                MeshAnalyzer.Shape.VEHICLE -> Frame.VEHICLE
+                MeshAnalyzer.Shape.QUADRUPED -> Frame.QUADRUPED
+                MeshAnalyzer.Shape.BIPED -> Frame.HUMANOID
+                // Bones on a shape with no limbs would bend the whole model the
+                // first time anything rotated them, which is the exact damage
+                // this rewrite exists to stop.
+                MeshAnalyzer.Shape.SOLID -> throw IllegalArgumentException(
+                    "No arms, legs or wheels were found on this model, so there is " +
+                        "nothing for bones to bend. Use a motion clip from Animate instead."
+                )
+            }
+
+            val skeleton = build(chosen, analysis)
+            val weights = skinWeights(mesh.positions, skeleton, chosen, analysis)
+            val out = File(outputDir, "${glb.nameWithoutExtension}_rigged.glb")
+            out.writeBytes(inject(root, bin, mesh, skeleton, weights, motion = null, label = "rig"))
+            Rigged(out, chosen, skeleton.bones.map { it.name })
+        }
+    }
+
+    private data class Opened(
+        val root: JsonObject,
+        val bin: ByteArray,
+        val mesh: MeshRef,
+        val analysis: MeshAnalyzer.Analysis,
+    )
+
+    /**
+     * Reads the file and measures it. Bones placed on guessed positions is what
+     * made rigging damage models instead of animating them; this is the step
+     * that reads the actual geometry.
+     */
+    private fun open(glb: File, outputDir: File): Opened {
+        require(glb.exists() && glb.length() > 20) { "Model file is missing or empty." }
+        outputDir.mkdirs()
+        val (root, bin) = Glb.split(glb.readBytes())
+        val mesh = readMesh(root, bin)
+            ?: throw IllegalArgumentException("This model has no mesh to rig.")
+        return Opened(root, bin, mesh, MeshAnalyzer.analyse(mesh.positions))
+    }
+
+    private fun build(frame: Frame, analysis: MeshAnalyzer.Analysis): Skeleton = when (frame) {
+        Frame.HUMANOID -> humanoid(analysis)
+        Frame.QUADRUPED -> quadruped(analysis)
+        Frame.VEHICLE -> vehicle(analysis)
     }
 
     /** Bone names a given frame will create, so a prompt can be told what exists. */
@@ -207,10 +270,26 @@ object AutoRigger {
         if (nodeIndex < 0) return null
         val node = nodes[nodeIndex].jsonObject
 
-        // A rig places joints in model space, so a transform on the mesh node
-        // would silently shift every bone. TRELLIS output has none.
-        if (node.keys.any { it == "translation" || it == "rotation" || it == "scale" || it == "matrix" }) {
-            throw IllegalArgumentException("This model's mesh carries its own transform, which auto-rigging cannot place bones through.")
+        // A rig places joints in model space, so a transform anywhere above the
+        // mesh would silently shift every bone. It has to be checked all the way
+        // up the tree, not just on the mesh node: a skinned mesh ignores its
+        // ancestors' transforms entirely, so a scaled parent would move the model
+        // the moment the skin was added. TRELLIS output has no transforms at all.
+        fun transformed(index: Int): Boolean = nodes[index].jsonObject.keys.any {
+            it == "translation" || it == "rotation" || it == "scale" || it == "matrix"
+        }
+        var check: Int? = nodeIndex
+        while (check != null) {
+            if (transformed(check)) {
+                throw IllegalArgumentException(
+                    "This model's mesh sits under a transform, which auto-rigging cannot place bones through."
+                )
+            }
+            val here = check
+            check = nodes.indices.firstOrNull { parent ->
+                nodes[parent].jsonObject["children"]?.jsonArray
+                    ?.any { it.jsonPrimitive.intOrNull == here } == true
+            }
         }
 
         val meshIndex = node["mesh"]!!.jsonPrimitive.int
@@ -267,6 +346,15 @@ object AutoRigger {
         /** Per-bone wheel radius; 0 for anything that is not a wheel. */
         val wheelRadius: FloatArray = FloatArray(bones.size),
         val wheelHalfWidth: Float = 0f,
+        /**
+         * Each measured limb and the bones built on it, ordered top to bottom.
+         *
+         * Declared here rather than rediscovered from bone positions later. That
+         * search matched by distance in x and z, so on a figure whose arms hang
+         * beside its legs it pulled the shoulder, elbow and hand into a leg's
+         * chain — and both shoulders ended up owning no geometry at all.
+         */
+        val limbChains: List<Pair<MeshAnalyzer.Limb, List<Int>>> = emptyList(),
     ) {
         /** Bone index → the child it points at, used for segment distances. */
         val childOf: IntArray = IntArray(bones.size) { -1 }
@@ -300,10 +388,12 @@ object AutoRigger {
         val legs = a.limbs.sortedBy { it.x }
         // Fall back to a symmetric guess only when the analysis found nothing —
         // the caller is warned about that separately.
-        val leftX = legs.firstOrNull()?.x ?: (cx - a.width * 0.18f)
-        val rightX = legs.lastOrNull()?.x ?: (cx + a.width * 0.18f)
-        val legZ = legs.map { it.z }.average().toFloat().takeIf { legs.isNotEmpty() } ?: cz
         val hipY = if (a.hasLimbs) a.bodyBaseY else a.minY + a.height * 0.53f
+        val fallback = listOf(
+            MeshAnalyzer.Limb(cx - a.width * 0.18f, cz, a.minY, hipY, a.width * 0.18f),
+            MeshAnalyzer.Limb(cx + a.width * 0.18f, cz, a.minY, hipY, a.width * 0.18f),
+        )
+        val pair = if (legs.size >= 2) listOf(legs.first(), legs.last()) else fallback
         val armSpread = a.width * 0.34f
 
         val bones = mutableListOf<Bone>()
@@ -316,18 +406,21 @@ object AutoRigger {
         val chest = add("chest", spine, cx, lerp(hipY, a.maxY, 0.62f), cz)
         add("head", chest, cx, lerp(hipY, a.maxY, 0.92f), cz)
 
-        listOf("l" to leftX, "r" to rightX).forEachIndexed { index, (side, legX) ->
+        val chains = mutableListOf<Pair<MeshAnalyzer.Limb, List<Int>>>()
+        listOf("l", "r").forEachIndexed { index, side ->
             val sign = if (index == 0) -1f else 1f
+            val leg = pair[index]
             val shoulder = add("${side}_shoulder", chest, cx + sign * armSpread, lerp(hipY, a.maxY, 0.58f), cz)
             val elbow = add("${side}_elbow", shoulder, cx + sign * armSpread, lerp(hipY, a.maxY, 0.30f), cz)
             add("${side}_hand", elbow, cx + sign * armSpread, hipY, cz)
 
             // The knee sits midway down the real leg, and the foot on the floor.
-            val thigh = add("${side}_thigh", hips, legX, hipY, legZ)
-            val knee = add("${side}_knee", thigh, legX, lerp(a.minY, hipY, 0.45f), legZ)
-            add("${side}_foot", knee, legX, a.minY, legZ)
+            val thigh = add("${side}_thigh", hips, leg.x, hipY, leg.z)
+            val knee = add("${side}_knee", thigh, leg.x, lerp(a.minY, hipY, 0.45f), leg.z)
+            val foot = add("${side}_foot", knee, leg.x, a.minY, leg.z)
+            if (a.hasLimbs) chains += leg to listOf(thigh, knee, foot)
         }
-        return Skeleton(bones)
+        return Skeleton(bones, limbChains = chains)
     }
 
     /** Spine along the body with the four legs the analysis measured. */
@@ -373,18 +466,21 @@ object AutoRigger {
         val chest = add("chest", spine, cx, hipY, frontZ)
         add("head", chest, cx, lerp(hipY, a.maxY, 0.55f), a.centreZ + a.length * 0.45f)
 
+        val chains = mutableListOf<Pair<MeshAnalyzer.Limb, List<Int>>>()
         listOf(false to "l", true to "r").forEach { (right, label) ->
             val f = side(front, right)
             val fUpper = add("${label}_front_upper", chest, f.x, hipY, f.z)
             val fLower = add("${label}_front_lower", fUpper, f.x, lerp(a.minY, hipY, 0.45f), f.z)
-            add("${label}_front_paw", fLower, f.x, a.minY, f.z)
+            val fPaw = add("${label}_front_paw", fLower, f.x, a.minY, f.z)
+            chains += f to listOf(fUpper, fLower, fPaw)
 
             val r = side(rear, right)
             val rUpper = add("${label}_rear_upper", hips, r.x, hipY, r.z)
             val rLower = add("${label}_rear_lower", rUpper, r.x, lerp(a.minY, hipY, 0.45f), r.z)
-            add("${label}_rear_paw", rLower, r.x, a.minY, r.z)
+            val rPaw = add("${label}_rear_paw", rLower, r.x, a.minY, r.z)
+            chains += r to listOf(rUpper, rLower, rPaw)
         }
-        return Skeleton(bones)
+        return Skeleton(bones, limbChains = if (a.hasLimbs) chains else emptyList())
     }
 
     /** A body bone plus one bone per wheel the analysis located. */
@@ -418,8 +514,6 @@ object AutoRigger {
     private const val LIMB_MARGIN = 1.45f
     /** A little above the body base, so the hip joint blends rather than cuts. */
     private const val LIMB_HEADROOM = 0.10f
-    /** How close a bone must sit to a limb's footprint to be part of its chain. */
-    private const val CHAIN_TOLERANCE = 0.05f
     /** How round a claimed region has to be before it is believed to be a wheel. */
     private const val MIN_ROUNDNESS = 0.75f
     /** A wheel is a small part of a vehicle; more than this is bodywork. */
@@ -461,24 +555,12 @@ object AutoRigger {
         val joints = ByteArray(count * 4)
         val values = FloatArray(count * 4)
 
-        // Each limb's bone chain, found by matching bone positions to the limb the
-        // analysis measured. Binding by geometry rather than by distance is what
-        // fixes the real failure: with a pure distance falloff the hips' long
-        // segment ran straight past the rear legs and won them, so an entire leg
-        // ended up owning no vertices and simply did not move.
-        val chains = analysis.limbs.map { limb ->
-            limb to s.bones.indices
-                .filter { b ->
-                    val bone = s.bones[b]
-                    val dx = bone.x - limb.x
-                    val dz = bone.z - limb.z
-                    // Only the limb's own bones sit directly above its footprint.
-                    sqrt(dx * dx + dz * dz) < (limb.radius + analysis.width * CHAIN_TOLERANCE) &&
-                        bone.name != "hips" && bone.name != "spine" &&
-                        bone.name != "chest" && bone.name != "head"
-                }
-                .sortedByDescending { s.bones[it].y }
-        }.filter { it.second.isNotEmpty() }
+        // Which bones belong to which limb, declared by the skeleton builder.
+        // Binding a limb's geometry to its own chain rather than by raw distance
+        // is what fixes the original failure: with a pure distance falloff the
+        // hips' long segment ran straight past the rear legs and won them, so an
+        // entire leg owned no vertices and simply did not move.
+        val chains = s.limbChains
 
         for (v in 0 until count) {
             val x = positions[v * 3]; val y = positions[v * 3 + 1]; val z = positions[v * 3 + 2]
@@ -534,8 +616,12 @@ object AutoRigger {
             }
             val total = bestW.sum()
             for (k in 0 until MAX_INFLUENCES) {
-                joints[v * 4 + k] = bestIdx[k].toByte()
-                values[v * 4 + k] = if (total > 0f) bestW[k] / total else if (k == 0) 1f else 0f
+                val w = if (total > 0f) bestW[k] / total else if (k == 0) 1f else 0f
+                // A joint index paired with a zero weight is a validator warning
+                // and a trap for any tool that reads influences without checking
+                // the weight, so an unused slot points at joint 0.
+                joints[v * 4 + k] = if (w > 0f) bestIdx[k].toByte() else 0
+                values[v * 4 + k] = w
             }
         }
         return Weights(joints, values)
@@ -566,8 +652,12 @@ object AutoRigger {
         val bottom = s.bones[b].y
         val t = if (top - bottom <= 1e-6f) 0f else ((top - y) / (top - bottom)).coerceIn(0f, 1f)
 
-        joints[v * 4] = a.toByte(); values[v * 4] = 1f - t
-        joints[v * 4 + 1] = b.toByte(); values[v * 4 + 1] = t
+        // Right on a joint the blend collapses to one bone; leaving the other
+        // index in place would pair a real joint with a zero weight.
+        joints[v * 4] = if (t < 1f) a.toByte() else 0
+        values[v * 4] = 1f - t
+        joints[v * 4 + 1] = if (t > 0f) b.toByte() else 0
+        values[v * 4 + 1] = t
     }
 
     // ---------------------------------------------------------------- motion
@@ -746,7 +836,8 @@ object AutoRigger {
         mesh: MeshRef,
         skeleton: Skeleton,
         weights: Weights,
-        motion: Motion,
+        /** Null writes the skeleton alone, for animating in code elsewhere. */
+        motion: Motion?,
         label: String,
     ): ByteArray {
         val extra = ByteArrayOutputStream()
@@ -779,9 +870,9 @@ object AutoRigger {
             ibm[m + 12] = -bone.x; ibm[m + 13] = -bone.y; ibm[m + 14] = -bone.z
         }
         val ibmAt = putFloats(ibm)
-        val timesAt = putFloats(motion.times)
-        val trackAt = motion.rotations.mapValues { (_, data) -> putFloats(data) }
-        val rootMoveAt = motion.rootTranslation?.let { putFloats(it) }
+        val timesAt = motion?.let { putFloats(it.times) }
+        val trackAt = motion?.rotations?.mapValues { (_, data) -> putFloats(data) } ?: emptyMap()
+        val rootMoveAt = motion?.rootTranslation?.let { putFloats(it) }
         align()
 
         val binSize = bin.size
@@ -819,7 +910,7 @@ object AutoRigger {
         val jointsAccessor = addAccessor(addView(jointsAt, vertexCount * 4), 5121, "VEC4", vertexCount)
         val weightsAccessor = addAccessor(addView(weightsAt, vertexCount * 16), 5126, "VEC4", vertexCount)
         val ibmAccessor = addAccessor(addView(ibmAt, skeleton.bones.size * 64), 5126, "MAT4", skeleton.bones.size)
-        val timeAccessor = addAccessor(
+        val timeAccessor = if (motion == null || timesAt == null) -1 else addAccessor(
             addView(timesAt, motion.times.size * 4), 5126, "SCALAR", motion.times.size,
             motion.times.first(), motion.times.last(),
         )
@@ -907,18 +998,26 @@ object AutoRigger {
             }
         }
 
-        trackAt.forEach { (bone, offset) ->
-            addChannel(firstJointNode + bone, "rotation", offset, 4, motion.times.size)
-        }
-        rootMoveAt?.let { offset ->
-            addChannel(firstJointNode, "translation", offset, 3, motion.times.size)
+        if (motion != null) {
+            trackAt.forEach { (bone, offset) ->
+                addChannel(firstJointNode + bone, "rotation", offset, 4, motion.times.size)
+            }
+            rootMoveAt?.let { offset ->
+                addChannel(firstJointNode, "translation", offset, 3, motion.times.size)
+            }
         }
 
+        // glTF requires every animation to carry at least one channel, so a clip
+        // that moved nothing is not written at all. Bones-only output takes this
+        // path deliberately: the skeleton is the deliverable and the motion is
+        // written in code against it.
         val animations = (root["animations"]?.jsonArray ?: JsonArray(emptyList())).toMutableList()
-        animations += buildJsonObject {
-            put("name", label)
-            put("samplers", JsonArray(samplers))
-            put("channels", JsonArray(channels))
+        if (channels.isNotEmpty()) {
+            animations += buildJsonObject {
+                put("name", label)
+                put("samplers", JsonArray(samplers))
+                put("channels", JsonArray(channels))
+            }
         }
 
         // The rig root replaces whatever the scene pointed at; the old roots stay
@@ -946,7 +1045,8 @@ object AutoRigger {
             put("scenes", JsonArray(scenes))
             put("meshes", JsonArray(meshes))
             put("skins", JsonArray(skins))
-            put("animations", JsonArray(animations))
+            // An empty animations array is invalid glTF; leave the key out.
+            if (animations.isNotEmpty()) put("animations", JsonArray(animations))
             put("buffers", buildJsonArray {
                 add(buildJsonObject { put("byteLength", binSize + extraBytes.size) })
             })

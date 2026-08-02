@@ -25,15 +25,15 @@ import kotlin.math.sqrt
  */
 object MeshAnalyzer {
 
-    enum class Shape {
+    enum class Shape(val label: String) {
         /** Two legs under a single torso. */
-        BIPED,
+        BIPED("two-legged figure"),
         /** Four legs under a horizontal body. */
-        QUADRUPED,
+        QUADRUPED("four-legged animal"),
         /** Flat and wide, with round clusters at the low corners. */
-        VEHICLE,
+        VEHICLE("vehicle"),
         /** Nothing limb-like found: a prop, a blob, or a pose that hides the legs. */
-        SOLID,
+        SOLID("solid shape"),
     }
 
     /** One limb, measured rather than assumed. */
@@ -68,7 +68,7 @@ object MeshAnalyzer {
         val summary: String
             get() = when (shape) {
                 Shape.BIPED -> "Two legs found — standing figure"
-                Shape.QUADRUPED -> "Four legs found — animal standing on all fours"
+                Shape.QUADRUPED -> "Four legs found — standing on all fours"
                 Shape.VEHICLE -> "${limbs.size} wheels found"
                 Shape.SOLID -> "No separate limbs — one solid shape"
             }
@@ -106,24 +106,31 @@ object MeshAnalyzer {
             fraction to cluster(p, minY + height * fraction, height * BAND_THICKNESS, width, length)
         }
 
-        val lower = bands.take(BAND_COUNT / 2).map { it.second.size }
-        val legCount = lower.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: 1
+        // Limbs read as an unbroken run of equal cluster counts that starts near
+        // the floor and ends where they merge into the body.
+        //
+        // Scoring a fixed half of the model instead threw away short-legged
+        // animals: a generated cartoon dog splits cleanly into four legs for its
+        // first three bands and merges at 18% of its height, which scored 0.5
+        // against the first six bands and was refused a skeleton entirely.
+        val counts = bands.map { it.second.size }
+        val run = limbRun(counts)
+        val legCount = run?.count ?: 1
 
-        // The body base is the lowest band where the limbs have merged — that is
-        // where the hips actually are, rather than a fraction of the height.
-        val mergeFraction = bands.firstOrNull { (f, c) ->
-            f > LOW_BAND && c.size < legCount && c.size <= 2
-        }?.first ?: MID_BAND
-        val bodyBaseY = minY + height * mergeFraction
+        // The body base is the band where the limbs merged — that is where the
+        // hips actually are, rather than a fraction of the height.
+        val mergeIndex = run?.let { min(it.end + 1, BAND_COUNT - 1) } ?: (BAND_COUNT - 1)
+        val bodyBaseY = minY + height * bands[mergeIndex].first
 
-        // Average each limb's position across every band that found it, so one
-        // noisy slice cannot move a bone.
-        val limbs = buildLimbs(bands, legCount, minY, height)
+        // Average each limb's position across every band of the run that found
+        // it, so one noisy slice cannot move a bone.
+        val limbs = if (run == null) emptyList()
+        else buildLimbs(bands.subList(run.start, run.end + 1), legCount, minY, height)
 
-        // How consistently the same number of limbs was seen. A shape that splits
-        // in one slice and not the next has not really been identified.
-        val agreement = if (lower.isEmpty()) 0f
-        else lower.count { it == legCount }.toFloat() / lower.size
+        // A run that does not reach the floor leaves bands underneath it that
+        // disagree, and those count against the fit.
+        val agreement = if (run == null) 0f
+        else (run.end - run.start + 1).toFloat() / (run.end + 1)
 
         // Wheels come from the roundness-checked detector rather than from band
         // clustering: a car's underside connects its wheels, so a horizontal
@@ -163,6 +170,32 @@ object MeshAnalyzer {
             bodyBaseY = bodyBaseY,
             confidence = confidence,
         )
+    }
+
+    /** A stretch of bands that all split into the same number of pieces. */
+    private class Run(val count: Int, val start: Int, val end: Int)
+
+    /**
+     * The longest run of equal cluster counts that could be limbs.
+     *
+     * It has to start near the floor — limbs are the bottom of a model, and a
+     * split that only appears halfway up is arms, a handle or noise — and it has
+     * to last a few bands, so a single lucky slice cannot invent a skeleton.
+     */
+    private fun limbRun(counts: List<Int>): Run? {
+        var best: Run? = null
+        var i = 0
+        while (i < counts.size) {
+            var j = i
+            while (j + 1 < counts.size && counts[j + 1] == counts[i]) j++
+            if (counts[i] in 2..4 && (best == null || j - i > best.end - best.start)) {
+                best = Run(counts[i], i, j)
+            }
+            i = j + 1
+        }
+        return best?.takeIf {
+            it.start <= MAX_RUN_START && it.end - it.start + 1 >= MIN_RUN_BANDS
+        }
     }
 
     // ------------------------------------------------------------- clustering
@@ -394,6 +427,9 @@ object MeshAnalyzer {
     /** Limbs must agree across most slices, and stand apart from each other. */
     private const val MIN_AGREEMENT = 0.6f
     private const val MIN_LIMB_GAP = 0.15f
+    /** Limbs are at the bottom, and have to survive more than one slice. */
+    private const val MAX_RUN_START = 2
+    private const val MIN_RUN_BANDS = 3
     // Wheel fitting, matched to what worked on real vehicles.
     private const val WHEEL_BAND = 0.38f
     private const val REFIT_PASSES = 4

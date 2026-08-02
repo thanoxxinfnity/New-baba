@@ -66,8 +66,13 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
     private val _baked = MutableStateFlow<Pair<String, String>?>(null)
     val baked: StateFlow<Pair<String, String>?> = _baked.asStateFlow()
 
+    /** The skeleton just added, so the screen can list the bones to drive in code. */
+    private val _rigged = MutableStateFlow<AutoRigger.Rigged?>(null)
+    val rigged: StateFlow<AutoRigger.Rigged?> = _rigged.asStateFlow()
+
     fun consumeMessage() { _message.value = null }
     fun consumeBaked() { _baked.value = null }
+    fun consumeRigged() { _rigged.value = null }
 
     /**
      * Inspecting a model means reading its glTF header and, for the suggestion,
@@ -200,6 +205,41 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
             .onFailure {
                 _busy.value = null
                 _message.value = it.message ?: "Could not rig this model."
+            }
+    }
+
+    /**
+     * Adds bones and skin weights only — no clip.
+     *
+     * This is the piece that has to be baked into the file. Motion can be
+     * written in code anywhere (three.js, `<model-viewer>`, Unity, Godot), but
+     * only against joints that already exist, and a generated model arrives with
+     * none. So this produces the rigged .glb and hands back the bone names to
+     * drive.
+     */
+    fun addBones(model: AnimatableModel) = viewModelScope.launch {
+        if (_busy.value != null) return@launch
+        _busy.value = "Measuring the model and placing bones…"
+
+        val dir = File(getApplication<Application>().filesDir, "models3d").apply { mkdirs() }
+        AutoRigger.addBones(File(model.path), dir)
+            .onSuccess { result ->
+                val name = "${model.name} · rigged"
+                runCatching {
+                    db.generationDao().insert(
+                        GenerationEntity(
+                            type = "3d", prompt = name, modelPath = result.file.absolutePath,
+                        )
+                    )
+                }
+                _busy.value = null
+                // The sheet stays up instead of jumping to the viewer: there is no
+                // clip to watch, and the bone names are the thing worth reading.
+                _rigged.value = result
+            }
+            .onFailure {
+                _busy.value = null
+                _message.value = it.message ?: "Could not add bones to this model."
             }
     }
 
