@@ -120,7 +120,9 @@ object AgentBrain {
                 apiKey = apiKey,
                 model = model,
                 turns = turns,
-                maxTokens = 700,
+                // One JSON action is tiny; a tight cap makes the model stop and
+                // return sooner instead of padding the reply.
+                maxTokens = 200,
                 temperature = 0.2,
             ).getOrElse { err ->
                 add(Role.ERROR, err.message ?: "The model did not respond.")
@@ -147,8 +149,10 @@ object AgentBrain {
                 else -> {
                     val result = execute(service, action)
                     add(Role.ACTION, "${describe(action)} → $result")
-                    // A moment for the UI to settle before the next screen read.
-                    delay(SETTLE_MS)
+                    // A short beat for the UI to settle before the next screen
+                    // read. Opening a whole app needs longer than a tap, so the
+                    // pause is matched to the action rather than fixed.
+                    delay(if (action.type == "launch") LAUNCH_SETTLE_MS else SETTLE_MS)
                 }
             }
         }
@@ -178,7 +182,9 @@ object AgentBrain {
     /** A compact description of what is on screen right now. */
     private fun screenReport(service: AutomationService): String {
         val pkg = service.currentPackage() ?: "unknown"
-        val elements = service.snapshot()
+        // Fewer, most-relevant elements keep the prompt short so the model
+        // answers faster; 28 covers a normal screen's interactive parts.
+        val elements = service.snapshot(limit = 28)
         val lines = elements.joinToString("\n") { e ->
             val kind = when {
                 e.editable -> "input"
@@ -367,8 +373,11 @@ object AgentBrain {
     }
 
     private const val MAX_STEPS = 25
-    private const val MAX_HISTORY = 24
-    private const val SETTLE_MS = 700L
+    // A shorter window keeps the prompt small, which lowers first-token latency —
+    // the recent past is what matters for the next tap, not the whole run.
+    private const val MAX_HISTORY = 14
+    private const val SETTLE_MS = 250L
+    private const val LAUNCH_SETTLE_MS = 650L
 
     private val SYSTEM_PROMPT = """
         You are VOID Agent, controlling a real Android phone for the user through an
