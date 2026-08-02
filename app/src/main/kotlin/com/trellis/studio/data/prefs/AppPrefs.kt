@@ -30,6 +30,7 @@ class AppPrefs(private val context: Context) {
         val KEY_HINGLISH         = booleanPreferencesKey("hinglish_thinking")
         val KEY_AGENT_URL        = stringPreferencesKey("agent_ws_url")
         val KEY_AGENT_MODEL      = stringPreferencesKey("agent_model")
+        val KEY_AGENT_VISION     = stringPreferencesKey("agent_vision_model")
         val KEY_AGENT_TTS        = booleanPreferencesKey("agent_tts")
 
         // The agent takes one small decision per turn and the user feels every
@@ -37,6 +38,10 @@ class AppPrefs(private val context: Context) {
         // correctly. Measured against the live API on the same task: 8B ~0.67s a
         // turn versus 70B ~2.06s — three times snappier for the same right answer.
         val DEFAULT_AGENT_MODEL  = "meta/llama-3.1-8b-instruct"
+
+        // Used only when the screen exposes no accessibility text (Godot, games,
+        // canvases): the agent screenshots and this model reads where to tap.
+        val DEFAULT_AGENT_VISION = "meta/llama-3.2-90b-vision-instruct"
 
         val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
         val DEFAULT_IMG     = "pollinations/flux"
@@ -69,6 +74,7 @@ class AppPrefs(private val context: Context) {
     val hinglishThinking: Flow<Boolean> = ds.data.catchIO().map { it[KEY_HINGLISH] ?: false }
     val agentUrl: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_URL] ?: "" }
     val agentModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_MODEL] ?: DEFAULT_AGENT_MODEL }
+    val agentVisionModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_VISION] ?: DEFAULT_AGENT_VISION }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
@@ -87,6 +93,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setHinglishThinking(v: Boolean) = ds.edit { it[KEY_HINGLISH] = v }
     suspend fun setAgentUrl(v: String) = ds.edit { it[KEY_AGENT_URL] = v.trim() }
     suspend fun setAgentModel(v: String) = ds.edit { it[KEY_AGENT_MODEL] = v }
+    suspend fun setAgentVisionModel(v: String) = ds.edit { it[KEY_AGENT_VISION] = v }
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
 }
 

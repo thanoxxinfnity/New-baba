@@ -3,12 +3,19 @@ package com.trellis.studio.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.annotation.RequiresApi
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.Executors
+import kotlin.coroutines.resume
 
 /**
  * The hands of the agent: it turns high-level instructions — tap here, type
@@ -260,6 +267,44 @@ class AutomationService : AccessibilityService() {
 
     /** The foreground package, so the brain knows which app it is looking at. */
     fun currentPackage(): String? = rootInActiveWindow?.packageName?.toString()
+
+    val screenWidth: Int get() = resources.displayMetrics.widthPixels
+    val screenHeight: Int get() = resources.displayMetrics.heightPixels
+
+    /**
+     * Captures the screen as a software bitmap. This is the agent's fallback for
+     * apps that draw their own UI — Godot, games, canvases — and so expose no
+     * accessibility nodes for [snapshot] to read. A vision model then decides
+     * where to tap from the picture instead.
+     *
+     * API 30+ only; older devices return null and the agent stays text-only.
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    suspend fun takeShot(): Bitmap? = suspendCancellableCoroutine { cont ->
+        val exec = Executors.newSingleThreadExecutor()
+        runCatching {
+            takeScreenshot(Display.DEFAULT_DISPLAY, exec, object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    val hardware = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                    // A hardware bitmap cannot be read back or JPEG-encoded, so it
+                    // is copied into an ordinary software bitmap first.
+                    val soft = hardware?.copy(Bitmap.Config.ARGB_8888, false)
+                    hardware?.recycle()
+                    result.hardwareBuffer.close()
+                    exec.shutdown()
+                    if (cont.isActive) cont.resume(soft)
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    exec.shutdown()
+                    if (cont.isActive) cont.resume(null)
+                }
+            })
+        }.onFailure {
+            exec.shutdown()
+            if (cont.isActive) cont.resume(null)
+        }
+    }
 
     companion object {
         /** The live service, or null until the user enables it in Settings. */

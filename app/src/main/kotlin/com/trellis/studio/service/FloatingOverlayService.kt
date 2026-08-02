@@ -311,6 +311,25 @@ class FloatingOverlayService : Service() {
             instance?.setStatus(text)
         }
 
+        /**
+         * Hides the whole bubble momentarily. The agent calls this around a
+         * screenshot and around each tap, so the bubble is neither captured in
+         * the picture the vision model reads nor sitting under the point being
+         * tapped. Restored with [showBubble].
+         */
+        fun hideBubble() {
+            instance?.let { svc -> main.post { svc.root.visibility = View.INVISIBLE } }
+        }
+
+        fun showBubble() {
+            instance?.let { svc -> main.post { svc.root.visibility = View.VISIBLE } }
+        }
+
+        /** Fold the panel back to the small bubble — done when a run starts. */
+        fun collapse() {
+            instance?.let { svc -> main.post { svc.expanded = false; svc.render() } }
+        }
+
         fun isRunning(): Boolean = instance != null
 
         const val CHANNEL_ID = "void_overlay"

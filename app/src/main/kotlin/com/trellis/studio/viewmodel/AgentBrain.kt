@@ -1,8 +1,11 @@
 package com.trellis.studio.viewmodel
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.os.Build
 import com.trellis.studio.audio.VoiceIo
 import com.trellis.studio.data.model.ChatTurn
+import java.io.File
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.NimClient
 import com.trellis.studio.service.AutomationService
@@ -103,6 +106,7 @@ object AgentBrain {
             return
         }
         val model = prefs.agentModel.first()
+        val visionModel = prefs.agentVisionModel.first()
         ttsOn = prefs.agentTts.first()
 
         val service = AutomationService.instance
@@ -126,26 +130,41 @@ object AgentBrain {
         }
 
         var steps = 0
+        var lastFailed = false
         val recent = ArrayDeque<String>()
         while (steps < MAX_STEPS) {
             steps++
 
-            val turns = buildTurns(app, service)
-            val reply = nim.chat(
-                apiKey = apiKey,
-                model = model,
-                turns = turns,
-                // One JSON action is tiny; a tight cap makes the model stop and
-                // return sooner instead of padding the reply.
-                maxTokens = 200,
-                temperature = 0.2,
-            ).getOrElse { err ->
-                add(Role.ERROR, err.message ?: "The model did not respond.")
-                return
+            // Choose eyes for this turn. Most apps expose accessibility text, which
+            // is fast and exact. An app that draws its own UI — Godot, a game, a
+            // canvas — exposes almost nothing, so when the reading is sparse (or
+            // the last text-mode action just failed on such a screen) the agent
+            // screenshots and a vision model decides where to tap instead.
+            val onVoid = service.currentPackage() == app.packageName
+            val elementCount = if (onVoid) 1 else service.snapshot(limit = 6).size
+            val useVision = !onVoid &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                (elementCount < VISION_MIN_ELEMENTS || lastFailed)
+
+            val action = if (useVision) {
+                visionAction(app, service, apiKey, visionModel)
+            } else {
+                val turns = buildTurns(app, service)
+                val reply = nim.chat(
+                    apiKey = apiKey,
+                    model = model,
+                    turns = turns,
+                    // One JSON action is tiny; a tight cap makes the model stop and
+                    // return sooner instead of padding the reply.
+                    maxTokens = 200,
+                    temperature = 0.2,
+                ).getOrElse { err ->
+                    add(Role.ERROR, err.message ?: "The model did not respond.")
+                    return
+                }
+                parseAction(reply.content.ifBlank { reply.reasoning.orEmpty() })
             }
 
-            val raw = reply.content.ifBlank { reply.reasoning.orEmpty() }
-            val action = parseAction(raw)
             if (action == null) {
                 add(Role.ERROR, "I couldn't work out the next step. Try rephrasing.")
                 return
@@ -162,7 +181,15 @@ object AgentBrain {
                 "wait" -> delay(action.ms.coerceIn(200L, 5_000L))
 
                 else -> {
+                    // Keep the bubble out from under the tap so the gesture lands
+                    // on the app, not on the overlay.
+                    val isTap = action.type == "click_xy" || action.type == "long_press" ||
+                        action.type == "swipe" || action.type == "click_text"
+                    if (isTap) { FloatingOverlayService.hideBubble(); delay(60) }
                     val result = execute(service, action)
+                    if (isTap) { delay(40); FloatingOverlayService.showBubble() }
+                    lastFailed = result.startsWith("no ") || result.contains("couldn't") ||
+                        result.contains("failed")
                     add(Role.ACTION, "${describe(action)} → $result")
 
                     // Stuck-detection: the same action over and over — usually a
@@ -233,6 +260,77 @@ object AgentBrain {
             "- \"${e.text}\" [$kind] at (${e.cx},${e.cy})"
         }.ifBlank { "- (no labelled elements read)" }
         return "CURRENT SCREEN (app: $pkg):\n$lines\n\nGive the next single action as JSON."
+    }
+
+    // ---------------------------------------------------------------- vision
+
+    /**
+     * Decides the next action from a screenshot, for apps that expose no
+     * accessibility text. The bubble is folded away and hidden first so it is
+     * neither in the picture nor over the tap, then a vision model is asked for
+     * the next move with pixel coordinates in the image — which are scaled back
+     * to real screen pixels before the gesture runs.
+     */
+    private suspend fun visionAction(
+        app: Context,
+        service: AutomationService,
+        apiKey: String,
+        visionModel: String,
+    ): Action? {
+        FloatingOverlayService.collapse()
+        FloatingOverlayService.hideBubble()
+        delay(140)   // let the overlay leave the frame before capturing
+        val shot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) service.takeShot() else null
+        FloatingOverlayService.showBubble()
+        if (shot == null) {
+            add(Role.ERROR, "Couldn't capture the screen (needs Android 11+).")
+            return null
+        }
+
+        // Downscale for token cost; keep the factor to map coordinates back.
+        val scale = if (shot.width > VISION_MAX_WIDTH) VISION_MAX_WIDTH.toFloat() / shot.width else 1f
+        val outW = (shot.width * scale).toInt().coerceAtLeast(1)
+        val outH = (shot.height * scale).toInt().coerceAtLeast(1)
+        val scaled = if (scale < 1f) Bitmap.createScaledBitmap(shot, outW, outH, true) else shot
+        val file = File(app.cacheDir, "agent_shot.jpg")
+        runCatching {
+            file.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+        }.onFailure { add(Role.ERROR, "Couldn't save the screenshot."); return null }
+        val backX = shot.width.toFloat() / outW
+        val backY = shot.height.toFloat() / outH
+        if (scaled !== shot) scaled.recycle()
+        shot.recycle()
+
+        val prompt = "GOAL: ${lastUserGoal()}\n${recentContext()}\n" +
+            "The screenshot is ${outW}x${outH} pixels. Decide the next single action. " +
+            "For taps and swipes give x,y in THIS image's pixels. Reply with ONE JSON object."
+        val reply = nim.chat(
+            apiKey = apiKey,
+            model = visionModel,
+            turns = listOf(
+                ChatTurn("system", VISION_PROMPT),
+                ChatTurn("user", prompt, imagePath = file.absolutePath),
+            ),
+            maxTokens = 250,
+            temperature = 0.2,
+            isVisionModel = true,
+        ).getOrElse { add(Role.ERROR, it.message ?: "The vision model didn't respond."); return null }
+
+        val a = parseAction(reply.content.ifBlank { reply.reasoning.orEmpty() }) ?: return null
+        // Map image pixels back to screen pixels for anything that taps.
+        return if (a.type == "click_xy" || a.type == "long_press" || a.type == "swipe") {
+            a.copy(x = a.x * backX, y = a.y * backY, x2 = a.x2 * backX, y2 = a.y2 * backY)
+        } else a
+    }
+
+    /** The most recent thing the user asked for. */
+    private fun lastUserGoal(): String =
+        _transcript.value.lastOrNull { it.role == Role.USER }?.text ?: "help with the current screen"
+
+    /** A couple of recent actions so the vision model has continuity. */
+    private fun recentContext(): String {
+        val done = _transcript.value.filter { it.role == Role.ACTION }.takeLast(3)
+        return if (done.isEmpty()) "" else "Recently: " + done.joinToString("; ") { it.text }
     }
 
     // --------------------------------------------------------------- execute
@@ -419,6 +517,10 @@ object AgentBrain {
     private const val LAUNCH_SETTLE_MS = 650L
     /** Identical action this many times in a row means it is stuck, not working. */
     private const val STUCK_WINDOW = 3
+    /** Below this many readable elements, the screen is treated as custom-drawn. */
+    private const val VISION_MIN_ELEMENTS = 2
+    /** Screenshots are downscaled to this width before going to the vision model. */
+    private const val VISION_MAX_WIDTH = 1080
 
     private val SYSTEM_PROMPT = """
         You are VOID Agent, controlling a real Android phone for the user through an
@@ -465,5 +567,34 @@ object AgentBrain {
           (Hindi/Hinglish is fine).
         - When the user's goal is achieved, reply with "done".
         - If you are unsure what the user wants, "ask" instead of guessing.
+    """.trimIndent()
+
+    private val VISION_PROMPT = """
+        You are VOID Agent, controlling a real Android phone. You are shown a
+        SCREENSHOT of an app that draws its own interface (like the Godot game
+        engine), so there is no element list — you must read the picture and pick
+        where to act by pixel coordinates in the image you are given.
+
+        Reply with ONE JSON object, nothing else:
+        {"action":"click_xy","x":640,"y":360,"say":"Tapping New"}   tap a point
+        {"action":"long_press","x":640,"y":360}                     press and hold
+        {"action":"type_text","text":"MyGame"}                      type into the focused field
+        {"action":"swipe","x":600,"y":1500,"endX":600,"endY":500}   swipe / drag
+        {"action":"scroll","dy":-800}                               scroll (negative = down)
+        {"action":"back"} {"action":"home"}                         navigation
+        {"action":"wait","ms":800}                                  wait for it to change
+        {"action":"say","message":"..."}                            tell the user, keep going
+        {"action":"ask","message":"..."}                            ask, then stop
+        {"action":"done","message":"..."}                           finished
+
+        Rules:
+        - Coordinates are pixels in the screenshot you were given. Aim for the
+          CENTRE of the button, icon or menu item you want.
+        - To press a button, click_xy on it. To type into a box, first click_xy on
+          the box, then on the next turn type_text.
+        - Do exactly one action per turn; you get a fresh screenshot after each.
+        - If the same thing hasn't changed after a tap, look again and adjust your
+          coordinates rather than repeating them.
+        - Keep "say" short, in the user's language. "done" when the goal is met.
     """.trimIndent()
 }
