@@ -55,6 +55,7 @@ sealed class NavRoute(
     object Voice : NavRoute("voice", "Voice", Icons.Outlined.GraphicEq, Icons.Filled.GraphicEq)
     object Animate : NavRoute("animate", "Animate", Icons.Outlined.Animation, Icons.Filled.Animation)
     object Artifacts : NavRoute("artifacts", "Builds", Icons.Outlined.Android, Icons.Filled.Android)
+    object Agent : NavRoute("agent", "Agent", Icons.Outlined.SmartToy, Icons.Filled.SmartToy)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
@@ -77,6 +78,7 @@ val drawerEntries = listOf(
     DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
     DrawerEntry("artifacts", "Builds", Icons.Filled.Android, "APKs, files and build logs", "Developer"),
     DrawerEntry("browser", "Browser", Icons.Filled.Public, "Real Google search", "Developer"),
+    DrawerEntry("agent", "AI Agent", Icons.Filled.SmartToy, "Let the AI control the phone", "Developer"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
 )
@@ -238,6 +240,7 @@ fun MainContent() {
                             onCreateModel = { go(NavRoute.Generate.route) },
                         )
                     }
+                    composable(NavRoute.Agent.route) { AgentScreen(onMenu = openDrawer) }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
 
                     // The image viewer existed but had no route, so tapping a
