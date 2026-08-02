@@ -6,6 +6,7 @@ import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.data.entity.QueuedJobEntity
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.TrellisClient
+import com.trellis.studio.util.MeshAnalyzer
 import com.trellis.studio.service.GenerationService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -187,9 +188,21 @@ class ModelQueue private constructor(app: Application) {
                         update(job.id) { it.copy(attempt = attempt, totalAttempts = total) }
                     },
                 ).onSuccess { path ->
+                    // Measure the model as soon as it lands: what shape it is and
+                    // where its limbs are. Doing it here means the rig is built on
+                    // measurements by the time the user asks for one, instead of on
+                    // bounding-box guesses.
+                    val shape = runCatching {
+                        MeshAnalyzer.analyse(java.io.File(path)).getOrNull()?.summary
+                    }.getOrNull()
                     runCatching {
                         db.generationDao().insert(
-                            GenerationEntity(type = "3d", prompt = job.prompt, modelPath = path)
+                            GenerationEntity(
+                                type = "3d",
+                                prompt = job.prompt,
+                                modelId = shape,
+                                modelPath = path,
+                            )
                         )
                     }
                     runCatching { db.queueDao().delete(job.id) }

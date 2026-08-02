@@ -120,15 +120,13 @@ object AutoRigger {
     /** What the model's proportions suggest, so the UI can preselect sensibly. */
     fun suggest(glb: File): Rig = runCatching {
         val mesh = readMesh(glb) ?: return Rig.HUMANOID_WALK
-        val b = Bounds(mesh.positions)
-        // Up is the axis the model is tallest on for a figure, and a vehicle is
-        // the flat, long case: much longer than tall and wider than tall.
-        val flatAndLong = b.height < 0.6f * b.length && b.width > 1.2f * b.height
-        val tall = b.height > 1.15f * max(b.length, b.width)
-        when {
-            flatAndLong -> Rig.VEHICLE_WHEELS
-            tall -> Rig.HUMANOID_WALK
-            else -> Rig.QUADRUPED_WALK
+        // The same measurement the rigger will use, so what is recommended and
+        // what gets built cannot disagree.
+        when (MeshAnalyzer.analyse(mesh.positions).shape) {
+            MeshAnalyzer.Shape.VEHICLE -> Rig.VEHICLE_WHEELS
+            MeshAnalyzer.Shape.QUADRUPED -> Rig.QUADRUPED_WALK
+            MeshAnalyzer.Shape.BIPED -> Rig.HUMANOID_WALK
+            MeshAnalyzer.Shape.SOLID -> Rig.HUMANOID_WALK
         }
     }.getOrDefault(Rig.HUMANOID_WALK)
 
@@ -152,14 +150,17 @@ object AutoRigger {
                 ?: throw IllegalArgumentException("This model has no mesh to rig.")
 
             val frame = spec?.frame ?: rig.frame
-            val bounds = Bounds(mesh.positions)
+            // Measure the model before touching it. Bones placed on guessed
+            // positions is what made rigging damage models instead of animating
+            // them; this is the step that reads the actual geometry.
+            val analysis = MeshAnalyzer.analyse(mesh.positions)
             val skeleton = when (frame) {
-                Frame.HUMANOID -> humanoid(bounds)
-                Frame.QUADRUPED -> quadruped(bounds)
-                Frame.VEHICLE -> vehicle(mesh.positions, bounds)
+                Frame.HUMANOID -> humanoid(analysis)
+                Frame.QUADRUPED -> quadruped(analysis)
+                Frame.VEHICLE -> vehicle(analysis)
             }
 
-            val weights = skinWeights(mesh.positions, skeleton, frame)
+            val weights = skinWeights(mesh.positions, skeleton, frame, analysis)
             val clips = spec?.let { custom(skeleton, it) } ?: motion(skeleton, rig)
             val label = spec?.name ?: rig.label
             val suffix = (spec?.name ?: rig.name).lowercase()
@@ -172,7 +173,11 @@ object AutoRigger {
 
     /** Bone names a given frame will create, so a prompt can be told what exists. */
     fun boneNames(frame: Frame): List<String> {
-        val unit = Bounds(floatArrayOf(-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f))
+        val unit = MeshAnalyzer.Analysis(
+            shape = MeshAnalyzer.Shape.SOLID, limbs = emptyList(),
+            minY = -0.5f, maxY = 0.5f, centreX = 0f, centreZ = 0f,
+            width = 1f, height = 1f, length = 1f, bodyBaseY = 0f, confidence = 0f,
+        )
         return when (frame) {
             Frame.HUMANOID -> humanoid(unit).bones.map { it.name }
             Frame.QUADRUPED -> quadruped(unit).bones.map { it.name }
@@ -280,174 +285,141 @@ object AutoRigger {
         }
     }
 
-    /** Hips, spine, head, two arms and two legs, sized off the bounding box. */
-    private fun humanoid(b: Bounds): Skeleton {
-        val cx = b.centreX
-        val cz = b.centreZ
-        val legSpread = b.width * 0.18f
-        val armSpread = b.width * 0.34f
-        val bones = mutableListOf<Bone>()
-        fun add(name: String, parent: Int, x: Float, y: Float, z: Float): Int {
-            bones += Bone(name, parent, x, y, z); return bones.size - 1
-        }
-
-        val hips = add("hips", -1, cx, b.y(0.53f), cz)
-        val spine = add("spine", hips, cx, b.y(0.70f), cz)
-        val chest = add("chest", spine, cx, b.y(0.82f), cz)
-        add("head", chest, cx, b.y(0.95f), cz)
-
-        for ((side, sign) in listOf("l" to -1f, "r" to 1f)) {
-            val shoulder = add("${side}_shoulder", chest, cx + sign * armSpread, b.y(0.80f), cz)
-            val elbow = add("${side}_elbow", shoulder, cx + sign * armSpread, b.y(0.66f), cz)
-            add("${side}_hand", elbow, cx + sign * armSpread, b.y(0.53f), cz)
-
-            val thigh = add("${side}_thigh", hips, cx + sign * legSpread, b.y(0.50f), cz)
-            val knee = add("${side}_knee", thigh, cx + sign * legSpread, b.y(0.27f), cz)
-            add("${side}_foot", knee, cx + sign * legSpread, b.y(0.02f), cz)
-        }
-        return Skeleton(bones)
-    }
-
-    /** Spine along the long axis with four legs hanging off it. */
-    private fun quadruped(b: Bounds): Skeleton {
-        val cx = b.centreX
-        val legSpread = b.width * 0.28f
-        val bones = mutableListOf<Bone>()
-        fun add(name: String, parent: Int, x: Float, y: Float, z: Float): Int {
-            bones += Bone(name, parent, x, y, z); return bones.size - 1
-        }
-
-        val hips = add("hips", -1, cx, b.y(0.62f), b.z(0.30f))
-        val spine = add("spine", hips, cx, b.y(0.66f), b.z(0.55f))
-        val chest = add("chest", spine, cx, b.y(0.66f), b.z(0.75f))
-        add("head", chest, cx, b.y(0.72f), b.z(0.94f))
-
-        // Front pair hangs from the chest, rear pair from the hips.
-        for ((side, sign) in listOf("l" to -1f, "r" to 1f)) {
-            val fUpper = add("${side}_front_upper", chest, cx + sign * legSpread, b.y(0.58f), b.z(0.74f))
-            val fLower = add("${side}_front_lower", fUpper, cx + sign * legSpread, b.y(0.30f), b.z(0.74f))
-            add("${side}_front_paw", fLower, cx + sign * legSpread, b.y(0.02f), b.z(0.74f))
-
-            val rUpper = add("${side}_rear_upper", hips, cx + sign * legSpread, b.y(0.58f), b.z(0.26f))
-            val rLower = add("${side}_rear_lower", rUpper, cx + sign * legSpread, b.y(0.30f), b.z(0.26f))
-            add("${side}_rear_paw", rLower, cx + sign * legSpread, b.y(0.02f), b.z(0.26f))
-        }
-        return Skeleton(bones)
-    }
-
     /**
-     * A body bone plus one bone per wheel, with each wheel's centre and radius
-     * measured from the vertices actually sitting in that corner.
+     * Hips, spine, head, two arms and two legs, placed on the legs the analysis
+     * actually found.
+     *
+     * The previous version derived leg positions from bounding-box fractions.
+     * On a real dog that put the rear legs 0.13 units from the real ones, on a
+     * body 0.99 long — so the bone sat in the belly and moving it dragged the
+     * belly. Measured positions are the whole point of this.
      */
-    private fun vehicle(positions: FloatArray, b: Bounds): Skeleton {
+    private fun humanoid(a: MeshAnalyzer.Analysis): Skeleton {
+        val cx = a.centreX
+        val cz = a.centreZ
+        val legs = a.limbs.sortedBy { it.x }
+        // Fall back to a symmetric guess only when the analysis found nothing —
+        // the caller is warned about that separately.
+        val leftX = legs.firstOrNull()?.x ?: (cx - a.width * 0.18f)
+        val rightX = legs.lastOrNull()?.x ?: (cx + a.width * 0.18f)
+        val legZ = legs.map { it.z }.average().toFloat().takeIf { legs.isNotEmpty() } ?: cz
+        val hipY = if (a.hasLimbs) a.bodyBaseY else a.minY + a.height * 0.53f
+        val armSpread = a.width * 0.34f
+
         val bones = mutableListOf<Bone>()
-        bones += Bone("body", -1, b.centreX, b.y(0.5f), b.centreZ)
-
-        val radii = mutableListOf<Float>()
-        var maxHalfWidth = 0f
-        val vertexCount = positions.size / 3
-
-        for ((zLabel, zFront) in listOf("front" to true, "rear" to false)) {
-            for ((xLabel, xRight) in listOf("l" to false, "r" to true)) {
-                fun inQuadrant(i: Int) =
-                    (positions[i + 2] > b.centreZ) == zFront && (positions[i] > b.centreX) == xRight
-
-                // Seed from the low corner, where a wheel must be, then refit against
-                // the whole quadrant. Staying inside the low band would truncate the
-                // top of the wheel and pull the fitted centre downwards, which makes
-                // the wheel wobble off its axle once it turns.
-                val seed = ArrayList<Int>()
-                val quadrant = ArrayList<Int>()
-                var i = 0
-                while (i < positions.size) {
-                    if (inQuadrant(i)) {
-                        quadrant += i
-                        if (positions[i + 1] <= b.y(0.38f)) seed += i
-                    }
-                    i += 3
-                }
-                if (seed.size < 24) continue
-
-                var cy = seed.sumOf { positions[it + 1].toDouble() }.toFloat() / seed.size
-                var cz = seed.sumOf { positions[it + 2].toDouble() }.toFloat() / seed.size
-                var radius = 0f
-                var source = seed
-
-                repeat(REFIT_PASSES) {
-                    val distances = source.map { v ->
-                        val dy = positions[v + 1] - cy; val dz = positions[v + 2] - cz
-                        sqrt(dy * dy + dz * dz)
-                    }.sorted()
-                    // A wheel's rim dominates the cluster, so the upper quartile of
-                    // radial distance sits close to its true radius.
-                    radius = distances[(distances.size * 3) / 4].coerceAtLeast(1e-4f)
-                    val near = quadrant.filter { v ->
-                        val dy = positions[v + 1] - cy; val dz = positions[v + 2] - cz
-                        sqrt(dy * dy + dz * dz) <= radius * 1.15f
-                    }
-                    if (near.size < 12) return@repeat
-                    cy = near.sumOf { positions[it + 1].toDouble() }.toFloat() / near.size
-                    cz = near.sumOf { positions[it + 2].toDouble() }.toFloat() / near.size
-                    source = ArrayList(near)
-                }
-
-                val ring = quadrant.filter { v ->
-                    val dy = positions[v + 1] - cy; val dz = positions[v + 2] - cz
-                    sqrt(dy * dy + dz * dz) <= radius * 1.15f
-                }
-                if (ring.size < 12) continue
-                val cx = ring.sumOf { positions[it].toDouble() }.toFloat() / ring.size
-                var halfWidth = 0f
-                ring.forEach { halfWidth = max(halfWidth, abs(positions[it] - cx)) }
-
-                // Only keep it if it is actually round. A wheel turning on its axle
-                // sweeps a disc, so claiming a flat slab — a hull panel, a fin —
-                // would smear it into one. Measured on real output: a real car's
-                // wheels come out 0.97-1.00 round, a spaceship's false positives
-                // 0.32-0.44.
-                fun claim(cut: Float) = ring.filter { v ->
-                    val dy = positions[v + 1] - cy; val dz = positions[v + 2] - cz
-                    sqrt(dy * dy + dz * dz) <= cut && abs(positions[v] - cx) <= halfWidth
-                }
-                // Cutting inside the fitted rim keeps bodywork out of the wheel. A
-                // wheel modelled as a bare rim has nothing inside it though, so fall
-                // back to the rim itself rather than discarding a real wheel.
-                var trimmed = radius * WHEEL_TRIM
-                var claimed = claim(trimmed)
-                if (claimed.size < 12) {
-                    trimmed = radius
-                    claimed = claim(trimmed)
-                }
-                if (claimed.size < 12) continue
-                var ry = 0f; var rz = 0f
-                claimed.forEach {
-                    ry = max(ry, abs(positions[it + 1] - cy))
-                    rz = max(rz, abs(positions[it + 2] - cz))
-                }
-                val roundness = if (max(ry, rz) <= 0f) 0f else min(ry, rz) / max(ry, rz)
-                val share = claimed.size.toFloat() / vertexCount
-                if (roundness < MIN_ROUNDNESS || share > MAX_WHEEL_SHARE) continue
-
-                radii += trimmed
-                maxHalfWidth = max(maxHalfWidth, halfWidth)
-                bones += Bone("${xLabel}_${zLabel}_wheel", 0, cx, cy, cz)
-            }
+        fun add(name: String, parent: Int, x: Float, y: Float, z: Float): Int {
+            bones += Bone(name, parent, x, y, z); return bones.size - 1
         }
 
-        if (radii.size < MIN_WHEELS) {
-            throw IllegalArgumentException(
-                "No round wheels found on this model — it needs visible wheels near the " +
-                    "corners. Use a motion clip from Animate instead."
+        val hips = add("hips", -1, cx, hipY, cz)
+        val spine = add("spine", hips, cx, lerp(hipY, a.maxY, 0.35f), cz)
+        val chest = add("chest", spine, cx, lerp(hipY, a.maxY, 0.62f), cz)
+        add("head", chest, cx, lerp(hipY, a.maxY, 0.92f), cz)
+
+        listOf("l" to leftX, "r" to rightX).forEachIndexed { index, (side, legX) ->
+            val sign = if (index == 0) -1f else 1f
+            val shoulder = add("${side}_shoulder", chest, cx + sign * armSpread, lerp(hipY, a.maxY, 0.58f), cz)
+            val elbow = add("${side}_elbow", shoulder, cx + sign * armSpread, lerp(hipY, a.maxY, 0.30f), cz)
+            add("${side}_hand", elbow, cx + sign * armSpread, hipY, cz)
+
+            // The knee sits midway down the real leg, and the foot on the floor.
+            val thigh = add("${side}_thigh", hips, legX, hipY, legZ)
+            val knee = add("${side}_knee", thigh, legX, lerp(a.minY, hipY, 0.45f), legZ)
+            add("${side}_foot", knee, legX, a.minY, legZ)
+        }
+        return Skeleton(bones)
+    }
+
+    /** Spine along the body with the four legs the analysis measured. */
+    private fun quadruped(a: MeshAnalyzer.Analysis): Skeleton {
+        val cx = a.centreX
+        val hipY = if (a.hasLimbs) a.bodyBaseY else a.minY + a.height * 0.62f
+
+        // Split the measured legs into front and rear by their position along the
+        // body, then into left and right. Naming them from the data is what lets
+        // a gait line up with the actual animal.
+        //
+        // With no measured limbs — a solid shape, or the bone-name listing — fall
+        // back to a symmetric layout so the skeleton is still well formed. The UI
+        // does not offer a rig in that case; this only has to not crash.
+        val legs = a.limbs.ifEmpty {
+            val dx = a.width * 0.28f
+            val dz = a.length * 0.30f
+            listOf(
+                MeshAnalyzer.Limb(cx - dx, a.centreZ + dz, a.minY, hipY, dx),
+                MeshAnalyzer.Limb(cx + dx, a.centreZ + dz, a.minY, hipY, dx),
+                MeshAnalyzer.Limb(cx - dx, a.centreZ - dz, a.minY, hipY, dx),
+                MeshAnalyzer.Limb(cx + dx, a.centreZ - dz, a.minY, hipY, dx),
             )
         }
-        val wheelRadius = FloatArray(bones.size)
-        radii.forEachIndexed { i, r -> wheelRadius[i + 1] = r }
-        return Skeleton(bones, wheelRadius, maxHalfWidth * 1.05f)
+        val frontRear = legs.sortedBy { it.z }
+        val rear = frontRear.take(2).ifEmpty { legs }
+        val front = frontRear.drop(2).ifEmpty { rear }
+        fun side(pair: List<MeshAnalyzer.Limb>, right: Boolean): MeshAnalyzer.Limb {
+            val sorted = pair.sortedBy { it.x }
+            return if (right) sorted.last() else sorted.first()
+        }
+
+        val frontZ = front.map { it.z }.average().toFloat()
+        val rearZ = rear.map { it.z }.average().toFloat()
+
+        val bones = mutableListOf<Bone>()
+        fun add(name: String, parent: Int, x: Float, y: Float, z: Float): Int {
+            bones += Bone(name, parent, x, y, z); return bones.size - 1
+        }
+
+        val hips = add("hips", -1, cx, hipY, rearZ)
+        val spine = add("spine", hips, cx, hipY, (rearZ + frontZ) / 2f)
+        val chest = add("chest", spine, cx, hipY, frontZ)
+        add("head", chest, cx, lerp(hipY, a.maxY, 0.55f), a.centreZ + a.length * 0.45f)
+
+        listOf(false to "l", true to "r").forEach { (right, label) ->
+            val f = side(front, right)
+            val fUpper = add("${label}_front_upper", chest, f.x, hipY, f.z)
+            val fLower = add("${label}_front_lower", fUpper, f.x, lerp(a.minY, hipY, 0.45f), f.z)
+            add("${label}_front_paw", fLower, f.x, a.minY, f.z)
+
+            val r = side(rear, right)
+            val rUpper = add("${label}_rear_upper", hips, r.x, hipY, r.z)
+            val rLower = add("${label}_rear_lower", rUpper, r.x, lerp(a.minY, hipY, 0.45f), r.z)
+            add("${label}_rear_paw", rLower, r.x, a.minY, r.z)
+        }
+        return Skeleton(bones)
     }
+
+    /** A body bone plus one bone per wheel the analysis located. */
+    private fun vehicle(a: MeshAnalyzer.Analysis): Skeleton {
+        require(a.limbs.size >= MIN_WHEELS) {
+            "No round wheels found on this model — it needs visible wheels near the " +
+                "corners. Use a motion clip from Animate instead."
+        }
+        val bones = mutableListOf(Bone("body", -1, a.centreX, a.minY + a.height * 0.5f, a.centreZ))
+        val radii = FloatArray(a.limbs.size + 1)
+        var halfWidth = 0f
+
+        // Named by corner so a description can address one wheel if it wants to.
+        a.limbs.sortedWith(compareByDescending<MeshAnalyzer.Limb> { it.z }.thenBy { it.x })
+            .forEachIndexed { index, wheel ->
+                val zLabel = if (wheel.z > a.centreZ) "front" else "rear"
+                val xLabel = if (wheel.x > a.centreX) "r" else "l"
+                bones += Bone("${xLabel}_${zLabel}_wheel", 0, wheel.x, wheel.hipY, wheel.z)
+                radii[bones.size - 1] = wheel.radius
+                halfWidth = max(halfWidth, wheel.radius)
+            }
+        return Skeleton(bones, radii, halfWidth * WHEEL_AXLE_WIDTH)
+    }
+
+    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     /** Centre-refit iterations, and how far inside the fitted rim to cut. */
     private const val REFIT_PASSES = 4
-    private const val WHEEL_TRIM = 0.88f
+    private const val WHEEL_AXLE_WIDTH = 1.6f
+    /** How far outside a limb's measured radius still counts as that limb. */
+    private const val LIMB_MARGIN = 1.45f
+    /** A little above the body base, so the hip joint blends rather than cuts. */
+    private const val LIMB_HEADROOM = 0.10f
+    /** How close a bone must sit to a limb's footprint to be part of its chain. */
+    private const val CHAIN_TOLERANCE = 0.05f
     /** How round a claimed region has to be before it is believed to be a wheel. */
     private const val MIN_ROUNDNESS = 0.75f
     /** A wheel is a small part of a vehicle; more than this is bodywork. */
@@ -479,10 +451,34 @@ object AutoRigger {
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
 
-    private fun skinWeights(positions: FloatArray, s: Skeleton, frame: Frame): Weights {
+    private fun skinWeights(
+        positions: FloatArray,
+        s: Skeleton,
+        frame: Frame,
+        analysis: MeshAnalyzer.Analysis,
+    ): Weights {
         val count = positions.size / 3
         val joints = ByteArray(count * 4)
         val values = FloatArray(count * 4)
+
+        // Each limb's bone chain, found by matching bone positions to the limb the
+        // analysis measured. Binding by geometry rather than by distance is what
+        // fixes the real failure: with a pure distance falloff the hips' long
+        // segment ran straight past the rear legs and won them, so an entire leg
+        // ended up owning no vertices and simply did not move.
+        val chains = analysis.limbs.map { limb ->
+            limb to s.bones.indices
+                .filter { b ->
+                    val bone = s.bones[b]
+                    val dx = bone.x - limb.x
+                    val dz = bone.z - limb.z
+                    // Only the limb's own bones sit directly above its footprint.
+                    sqrt(dx * dx + dz * dz) < (limb.radius + analysis.width * CHAIN_TOLERANCE) &&
+                        bone.name != "hips" && bone.name != "spine" &&
+                        bone.name != "chest" && bone.name != "head"
+                }
+                .sortedByDescending { s.bones[it].y }
+        }.filter { it.second.isNotEmpty() }
 
         for (v in 0 until count) {
             val x = positions[v * 3]; val y = positions[v * 3 + 1]; val z = positions[v * 3 + 2]
@@ -495,25 +491,40 @@ object AutoRigger {
                 for (bone in 1 until s.bones.size) {
                     val b = s.bones[bone]
                     val dy = y - b.y; val dz = z - b.z
-                    val radial = sqrt(dy * dy + dz * dz)
-                    if (radial <= s.wheelRadius[bone] && abs(x - b.x) <= s.wheelHalfWidth) {
-                        owner = bone
-                        break
-                    }
+                    if (sqrt(dy * dy + dz * dz) <= s.wheelRadius[bone] &&
+                        abs(x - b.x) <= s.wheelHalfWidth
+                    ) { owner = bone; break }
                 }
                 joints[v * 4] = owner.toByte()
                 values[v * 4] = 1f
                 continue
             }
 
-            // Inverse-distance falloff, sharp enough that a vertex is dominated by
-            // the bone it sits on but still blends across a joint.
+            // Inside a limb's footprint and below the body: it is that limb's.
+            val limb = if (y <= analysis.bodyBaseY + analysis.height * LIMB_HEADROOM) {
+                chains.minByOrNull { (l, _) ->
+                    val dx = x - l.x; val dz = z - l.z
+                    dx * dx + dz * dz
+                }?.takeIf { (l, _) ->
+                    val dx = x - l.x; val dz = z - l.z
+                    sqrt(dx * dx + dz * dz) <= l.radius * LIMB_MARGIN
+                }
+            } else null
+
+            if (limb != null) {
+                writeChainWeights(s, limb.second, y, joints, values, v)
+                continue
+            }
+
+            // Everything else falls back to inverse-distance over the bones that
+            // are not part of a limb, so a body vertex cannot be claimed by a leg.
+            val candidates = s.bones.indices.filter { b -> chains.none { b in it.second } }
+                .ifEmpty { s.bones.indices.toList() }
             val bestIdx = IntArray(MAX_INFLUENCES)
             val bestW = FloatArray(MAX_INFLUENCES)
-            for (bone in s.bones.indices) {
+            for (bone in candidates) {
                 val d = distanceToBone(s, bone, x, y, z)
                 val w = 1f / (d * d * d * d + 1e-6f)
-                // Keep the running top four.
                 var slot = -1
                 var lowest = w
                 for (k in 0 until MAX_INFLUENCES) {
@@ -528,6 +539,35 @@ object AutoRigger {
             }
         }
         return Weights(joints, values)
+    }
+
+    /**
+     * Blends a vertex between the two bones of its limb it sits between, by
+     * height. A hard assignment would crease the leg at every joint.
+     */
+    private fun writeChainWeights(
+        s: Skeleton,
+        chain: List<Int>,
+        y: Float,
+        joints: ByteArray,
+        values: FloatArray,
+        v: Int,
+    ) {
+        if (chain.size == 1) {
+            joints[v * 4] = chain[0].toByte(); values[v * 4] = 1f
+            return
+        }
+        // The chain runs top to bottom, so find the pair this height falls between.
+        var upper = 0
+        while (upper < chain.size - 2 && y < s.bones[chain[upper + 1]].y) upper++
+        val a = chain[upper]
+        val b = chain[upper + 1]
+        val top = s.bones[a].y
+        val bottom = s.bones[b].y
+        val t = if (top - bottom <= 1e-6f) 0f else ((top - y) / (top - bottom)).coerceIn(0f, 1f)
+
+        joints[v * 4] = a.toByte(); values[v * 4] = 1f - t
+        joints[v * 4 + 1] = b.toByte(); values[v * 4 + 1] = t
     }
 
     // ---------------------------------------------------------------- motion

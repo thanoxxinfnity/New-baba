@@ -9,6 +9,7 @@ import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.AnimationDirector
 import com.trellis.studio.util.AnimationBaker
 import com.trellis.studio.util.AutoRigger
+import com.trellis.studio.util.MeshAnalyzer
 import com.trellis.studio.util.FileExport
 import com.trellis.studio.util.ModelExporter
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,10 @@ data class AnimatableModel(
     val existingClips: List<String>,
     /** The rig its proportions suggest, so the right tab opens first. */
     val suggestedRig: AutoRigger.Rig,
+    /** What the model actually is, measured — not guessed from the bounding box. */
+    val shape: MeshAnalyzer.Shape,
+    val shapeSummary: String,
+    val confidence: Float,
 )
 
 /**
@@ -81,6 +86,7 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
             if (cachedStamp == stamp) return cached.copy(id = id, name = displayName(file))
         }
 
+        val analysis = runCatching { MeshAnalyzer.analyse(ModelExporter.parseGlb(file)) }.getOrNull()
         val fresh = AnimatableModel(
             id = id,
             name = displayName(file),
@@ -88,6 +94,9 @@ class AnimateViewModel(app: Application) : AndroidViewModel(app) {
             sizeLabel = FileExport.humanSize(file.length()),
             existingClips = AnimationBaker.clipNames(file).filter { it.isNotBlank() },
             suggestedRig = AutoRigger.suggest(file),
+            shape = analysis?.shape ?: MeshAnalyzer.Shape.SOLID,
+            shapeSummary = analysis?.summary ?: "Could not read this model",
+            confidence = analysis?.confidence ?: 0f,
         )
         inspected[path] = stamp to fresh
         return fresh

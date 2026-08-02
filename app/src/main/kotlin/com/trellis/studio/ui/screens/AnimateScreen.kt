@@ -28,6 +28,7 @@ import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.AnimationBaker
 import com.trellis.studio.util.AutoRigger
+import com.trellis.studio.util.MeshAnalyzer
 import com.trellis.studio.util.FileExport
 import com.trellis.studio.viewmodel.AnimatableModel
 import com.trellis.studio.viewmodel.AnimateViewModel
@@ -163,11 +164,19 @@ fun AnimateScreen(
                     )
                 }
 
+                if (selected?.shape == MeshAnalyzer.Shape.SOLID) {
+                    item { NoLimbsNotice() }
+                }
+
                 items(AutoRigger.Rig.entries, key = { "rig_${it.name}" }) { rig ->
                     val model = selected
+                    // A skeleton needs limbs to attach to. Offering one for a model
+                    // that measured as a single solid shape is how the rig ended up
+                    // bending the whole thing — so it is not offered.
+                    val fits = model != null && model.shape != MeshAnalyzer.Shape.SOLID
                     RigRow(
                         rig = rig,
-                        enabled = model != null && busy == null,
+                        enabled = fits && busy == null,
                         suggested = model?.suggestedRig == rig,
                         onRig = { model?.let { vm.rig(it, rig) } },
                     )
@@ -280,11 +289,21 @@ private fun ModelRow(
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
             )
-            val subtitle = if (model.existingClips.isEmpty()) model.sizeLabel
-            else "${model.sizeLabel} · plays ${model.existingClips.joinToString(", ")}"
             Text(
-                subtitle,
+                if (model.existingClips.isEmpty()) model.sizeLabel
+                else "${model.sizeLabel} · plays ${model.existingClips.joinToString(", ")}",
                 color = if (model.existingClips.isEmpty()) TextDisabled else Teal,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+            // What the mesh was measured to be. Bones are placed on this, so it is
+            // the honest predictor of whether a rig will look right.
+            Text(
+                model.shapeSummary,
+                color = when (model.shape) {
+                    MeshAnalyzer.Shape.SOLID -> Amber
+                    else -> Cyan
+                },
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
             )
@@ -384,6 +403,25 @@ private fun PromptBox(
                 maxLines = 1,
             )
         }
+    }
+}
+
+/** Shown when the measurement found nothing to attach bones to. */
+@Composable
+private fun NoLimbsNotice() {
+    Row(
+        Modifier.fillMaxWidth().glass(glow = Amber).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Info, null, tint = Amber, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "This model measured as one solid shape — no separate legs or wheels " +
+                "to move. A skeleton would just bend the whole thing, so the " +
+                "whole-object clips below are the ones that will look right.",
+            color = TextSecondary,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
