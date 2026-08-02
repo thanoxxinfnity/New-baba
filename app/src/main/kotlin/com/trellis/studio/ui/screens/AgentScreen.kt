@@ -1,15 +1,21 @@
 package com.trellis.studio.ui.screens
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import android.text.TextUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -19,23 +25,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.service.AutomationService
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
+import com.trellis.studio.viewmodel.AgentBrain
 import com.trellis.studio.viewmodel.AgentController
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * The control panel for the on-device agent: point it at a server, hand it the
- * two permissions it needs, and turn it on. Once running it can tap, type and
- * open apps on command; the floating bubble carries the same controls over
- * every other app.
+ * Talk to VOID's agent the way you talk to the chat: say what you want done —
+ * "open Godot and make a new 2D scene", "reply to the last WhatsApp" — and it
+ * drives the phone to do it, speaking back as it goes. Voice in, voice out, and
+ * a floating bubble so it keeps working over other apps.
  */
 @Composable
 fun AgentScreen(onMenu: () -> Unit = {}) {
@@ -43,32 +50,49 @@ fun AgentScreen(onMenu: () -> Unit = {}) {
     val prefs = remember { AppPrefs(context) }
     val scope = rememberCoroutineScope()
 
-    val state by AgentController.state.collectAsStateWithLifecycle()
+    val transcript by AgentBrain.transcript.collectAsStateWithLifecycle()
+    val busy by AgentBrain.busy.collectAsStateWithLifecycle()
+    val controllerState by AgentController.state.collectAsStateWithLifecycle()
 
-    var url by remember { mutableStateOf("") }
-    var loaded by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }
+    var ttsOn by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
-        url = prefs.agentUrl.first()
-        loaded = true
+        ttsOn = prefs.agentTts.first()
+        AgentBrain.setSpeaking(ttsOn)
     }
 
-    // Re-checked on every recomposition so returning from Settings updates the
-    // chips without a manual refresh.
+    // Re-read on each recomposition, so returning from Settings updates the state.
     val overlayOk = Settings.canDrawOverlays(context)
     val accessibilityOk = isAccessibilityEnabled(context)
+    val ready = accessibilityOk
 
-    val snackbar = remember { SnackbarHostState() }
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) AgentController.startVoice(context) }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        containerColor = Color.Transparent,
-    ) { pad ->
-        Column(
-            Modifier
-                .padding(pad)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-        ) {
+    fun talk() {
+        val has = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (has) AgentController.startVoice(context) else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    fun send() {
+        val text = input.trim()
+        if (text.isEmpty()) return
+        AgentBrain.submit(context, text)
+        input = ""
+    }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(transcript.size) {
+        if (transcript.isNotEmpty()) listState.animateScrollToItem(transcript.size - 1)
+    }
+
+    Scaffold(containerColor = Color.Transparent) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+
+            // Header
             Row(
                 Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -81,232 +105,236 @@ fun AgentScreen(onMenu: () -> Unit = {}) {
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "Let the agent control the phone on command",
+                        if (ready) "Tell me what to do on your phone"
+                        else "Needs the accessibility service",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
+                        color = if (ready) TextSecondary else Amber,
                     )
                 }
-                StatusDot(state.phase)
+                // Speak-aloud toggle.
+                IconButton(onClick = {
+                    ttsOn = !ttsOn
+                    AgentBrain.setSpeaking(ttsOn)
+                    scope.launch { prefs.setAgentTts(ttsOn) }
+                }) {
+                    Icon(
+                        if (ttsOn) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                        "Speak replies",
+                        tint = if (ttsOn) Cyan else TextDisabled,
+                    )
+                }
+                // Floating-bubble toggle for background use over other apps.
+                IconButton(onClick = {
+                    if (controllerState.overlayUp) AgentController.hideOverlay(context)
+                    else if (overlayOk) AgentController.showOverlay(context)
+                    else context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    )
+                }) {
+                    Icon(
+                        Icons.Default.BubbleChart,
+                        "Floating bubble",
+                        tint = if (controllerState.overlayUp) Pink else TextDisabled,
+                    )
+                }
             }
 
-            Column(
-                Modifier.padding(horizontal = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                StatusCard(state)
+            if (!ready) {
+                PermissionBanner(
+                    onEnable = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                )
+            }
 
-                // 1 — the two special permissions the agent cannot work without.
-                Column(
-                    Modifier.fillMaxWidth().glass().padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text("1 · Permissions", style = MaterialTheme.typography.labelLarge, color = Cyan)
-                    PermissionRow(
-                        label = "Draw over other apps",
-                        note = "For the floating control bubble",
-                        granted = overlayOk,
-                        onGrant = {
-                            context.startActivity(
-                                Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${context.packageName}"),
-                                )
-                            )
-                        },
-                    )
-                    PermissionRow(
-                        label = "Accessibility service",
-                        note = "The taps, typing and app launches run through it",
-                        granted = accessibilityOk,
-                        onGrant = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                    )
-                }
-
-                // 2 — where the commands come from.
-                Column(
-                    Modifier.fillMaxWidth().glass().padding(14.dp),
+            // Conversation
+            if (transcript.isEmpty()) {
+                EmptyAgentHint(Modifier.weight(1f))
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("2 · Agent server", style = MaterialTheme.typography.labelLarge, color = Cyan)
-                    Text(
-                        "The WebSocket your Replit or remote agent serves. It sends " +
-                            "JSON commands; the app runs them and reports back.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextDisabled,
-                    )
-                    OutlinedTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        enabled = loaded && state.phase == AgentController.Phase.OFF,
-                        singleLine = true,
-                        placeholder = {
-                            Text("wss://your-agent.repl.co/ws", color = TextDisabled,
-                                style = MaterialTheme.typography.bodySmall)
-                        },
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Cyan,
-                            unfocusedBorderColor = BorderDark,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            cursorColor = Cyan,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
+                    items(transcript) { m -> MessageBubble(m) }
+                }
+            }
+
+            if (busy) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(13.dp), color = Cyan, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Working…", color = Cyan, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { AgentBrain.stop() }) {
+                        Text("Stop", color = Color(0xFFDC2626), style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            // Input row: mic + text + send
+            Row(
+                Modifier.fillMaxWidth().padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val listening = controllerState.listening
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(if (listening) Pink else Purple40)
+                        .clickable(enabled = ready) { if (listening) AgentController.stopVoice() else talk() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (listening) Icons.Default.GraphicEq else Icons.Default.Mic,
+                        "Speak",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
 
-                // 3 — the switch.
-                if (state.phase == AgentController.Phase.OFF) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                prefs.setAgentUrl(url)
-                                when (val problem = AgentController.start(context, url.trim())) {
-                                    null -> Unit
-                                    "overlay-permission" ->
-                                        snackbar.showSnackbar("Grant \"Draw over other apps\" first.")
-                                    "accessibility-permission" ->
-                                        snackbar.showSnackbar("Turn on the Accessibility service first.")
-                                    else -> snackbar.showSnackbar(problem)
-                                }
-                            }
-                        },
-                        enabled = loaded,
-                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Start agent", color = Color.Black, fontWeight = FontWeight.SemiBold)
-                    }
-                } else {
-                    Button(
-                        onClick = { AgentController.stop(context) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Default.Stop, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Stop agent", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    }
-                }
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    enabled = ready,
+                    placeholder = {
+                        Text(
+                            "Kya karna hai? e.g. open Chrome",
+                            color = TextDisabled,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    shape = RoundedCornerShape(22.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Cyan,
+                        unfocusedBorderColor = BorderDark,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = Cyan,
+                    ),
+                    maxLines = 4,
+                    modifier = Modifier.weight(1f),
+                )
 
-                CommandReference()
-                Spacer(Modifier.height(20.dp))
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(if (input.isBlank()) CardHigh else Cyan)
+                        .clickable(enabled = ready && input.isNotBlank()) { send() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.Send, "Send",
+                        tint = if (input.isBlank()) TextDisabled else Color.Black,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun StatusDot(phase: AgentController.Phase) {
-    val color = when (phase) {
-        AgentController.Phase.CONNECTED -> Teal
-        AgentController.Phase.CONNECTING -> Amber
-        AgentController.Phase.OFF -> TextDisabled
-    }
-    Box(Modifier.size(12.dp).clip(CircleShape).background(color))
-}
+private fun MessageBubble(m: AgentBrain.Message) {
+    when (m.role) {
+        AgentBrain.Role.USER -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Box(
+                Modifier
+                    .widthIn(max = 300.dp)
+                    .clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp))
+                    .background(Purple40)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) { Text(m.text, color = Color.White, style = MaterialTheme.typography.bodyMedium) }
+        }
 
-@Composable
-private fun StatusCard(state: AgentController.State) {
-    val glow = when (state.phase) {
-        AgentController.Phase.CONNECTED -> Teal
-        AgentController.Phase.CONNECTING -> Amber
-        AgentController.Phase.OFF -> Purple40
-    }
-    Row(
-        Modifier.fillMaxWidth().glass(glow = glow).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            when (state.phase) {
-                AgentController.Phase.CONNECTED -> Icons.Default.SmartToy
-                AgentController.Phase.CONNECTING -> Icons.Default.Sync
-                AgentController.Phase.OFF -> Icons.Default.PowerSettingsNew
-            },
-            null, tint = glow, modifier = Modifier.size(26.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                when (state.phase) {
-                    AgentController.Phase.CONNECTED -> "Agent connected"
-                    AgentController.Phase.CONNECTING -> "Connecting…"
-                    AgentController.Phase.OFF -> "Agent off"
-                },
-                color = TextPrimary,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(state.detail, color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+        AgentBrain.Role.AGENT -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+            Box(
+                Modifier
+                    .widthIn(max = 300.dp)
+                    .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
+                    .background(CardHigh)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) { Text(m.text, color = TextPrimary, style = MaterialTheme.typography.bodyMedium) }
+        }
+
+        AgentBrain.Role.ACTION -> Row(
+            Modifier.fillMaxWidth().padding(start = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.TouchApp, null, tint = Teal, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(m.text, color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+        }
+
+        AgentBrain.Role.ERROR -> Row(
+            Modifier.fillMaxWidth().padding(start = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.ErrorOutline, null, tint = Amber, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(m.text, color = Amber, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
 
 @Composable
-private fun PermissionRow(
-    label: String,
-    note: String,
-    granted: Boolean,
-    onGrant: () -> Unit,
-) {
+private fun PermissionBanner(onEnable: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            .glass(glow = Amber).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            if (granted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-            null,
-            tint = if (granted) Teal else Amber,
-            modifier = Modifier.size(20.dp),
-        )
+        Icon(Icons.Default.Accessibility, null, tint = Amber, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
-            Text(note, color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+            Text("Accessibility off", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Turn on VOID's accessibility service so it can tap and type for you.",
+                color = TextSecondary, style = MaterialTheme.typography.labelSmall,
+            )
         }
-        if (!granted) {
-            TextButton(onClick = onGrant) {
-                Text("Grant", color = Cyan, style = MaterialTheme.typography.labelLarge)
-            }
+        TextButton(onClick = onEnable) {
+            Text("Enable", color = Cyan, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
 
 @Composable
-private fun CommandReference() {
+private fun EmptyAgentHint(modifier: Modifier) {
     Column(
-        Modifier.fillMaxWidth().glass(fill = GlassFill.copy(alpha = 0.5f)).padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier.fillMaxWidth().padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Code, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Commands the agent can send", color = TextPrimary,
-                style = MaterialTheme.typography.labelLarge)
-        }
+        Icon(Icons.Default.SmartToy, null, tint = TextDisabled, modifier = Modifier.size(52.dp))
+        Spacer(Modifier.height(14.dp))
+        Text("Tell me what to do", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(6.dp))
         Text(
-            """
-            |{"type":"click","x":500,"y":1000}
-            |{"type":"click_text","text":"Login"}
-            |{"type":"type_text","text":"Hello"}
-            |{"type":"swipe","startX":..,"startY":..,"endX":..,"endY":..}
-            |{"type":"scroll","dy":-800}
-            |{"type":"launch","package":"com.whatsapp"}
-            |{"type":"home"} {"type":"back"} {"type":"recents"}
-            """.trimMargin(),
-            color = TextSecondary,
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-        )
-        Text(
-            "Each command is answered with " +
-                "{\"type\":\"status\",\"ok\":true|false,\"detail\":\"…\"}.",
+            "Type or tap the mic. I'll open apps, tap, type and scroll for you — " +
+                "and talk you through it. Turn on the bubble to keep me working over " +
+                "other apps.",
             color = TextDisabled,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
         )
+        Spacer(Modifier.height(16.dp))
+        listOf(
+            "Open Chrome and search for cats",
+            "Open WhatsApp",
+            "Go to home screen",
+        ).forEach {
+            Text("· $it", color = TextDisabled, style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(vertical = 2.dp))
+        }
     }
 }
 

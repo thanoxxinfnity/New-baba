@@ -29,6 +29,11 @@ class AppPrefs(private val context: Context) {
         val KEY_BUILD_TOKEN      = stringPreferencesKey("build_server_token")
         val KEY_HINGLISH         = booleanPreferencesKey("hinglish_thinking")
         val KEY_AGENT_URL        = stringPreferencesKey("agent_ws_url")
+        val KEY_AGENT_MODEL      = stringPreferencesKey("agent_model")
+        val KEY_AGENT_TTS        = booleanPreferencesKey("agent_tts")
+
+        /** The agent plans multi-step phone control, so it defaults to a strong model. */
+        val DEFAULT_AGENT_MODEL  = "meta/llama-3.1-70b-instruct"
 
         val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
         val DEFAULT_IMG     = "pollinations/flux"
@@ -60,6 +65,8 @@ class AppPrefs(private val context: Context) {
     val buildServerToken: Flow<String> = ds.data.catchIO().map { it[KEY_BUILD_TOKEN] ?: "" }
     val hinglishThinking: Flow<Boolean> = ds.data.catchIO().map { it[KEY_HINGLISH] ?: false }
     val agentUrl: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_URL] ?: "" }
+    val agentModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_MODEL] ?: DEFAULT_AGENT_MODEL }
+    val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }
@@ -76,6 +83,8 @@ class AppPrefs(private val context: Context) {
     suspend fun setBuildServerToken(v: String) = ds.edit { it[KEY_BUILD_TOKEN] = v.trim() }
     suspend fun setHinglishThinking(v: Boolean) = ds.edit { it[KEY_HINGLISH] = v }
     suspend fun setAgentUrl(v: String) = ds.edit { it[KEY_AGENT_URL] = v.trim() }
+    suspend fun setAgentModel(v: String) = ds.edit { it[KEY_AGENT_MODEL] = v }
+    suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
 }
 
 private fun Flow<Preferences>.catchIO() = catch { e ->

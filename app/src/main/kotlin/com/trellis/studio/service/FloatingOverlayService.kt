@@ -119,13 +119,15 @@ class FloatingOverlayService : Service() {
             setPadding(0, 0, 0, dp(10))
         }
 
-        val start = actionButton("Start Automation", 0xFF16A34A.toInt()) {
-            onStart?.invoke() ?: pushLog("No start handler connected.")
+        // The headline control: hold-to-talk. Tapping it starts listening, and
+        // the spoken instruction is handed straight to the agent.
+        val talk = actionButton("🎤  Speak a command", 0xFF7C3AED.toInt()) {
+            onStart?.invoke() ?: pushLog("No voice handler connected.")
         }
-        val stop = actionButton("Stop Automation", 0xFFDC2626.toInt()) {
+        val stop = actionButton("Stop agent", 0xFFDC2626.toInt()) {
             onStop?.invoke() ?: pushLog("No stop handler connected.")
         }
-        val status = actionButton("AI Agent Status", 0xFF2563EB.toInt()) {
+        val status = actionButton("Status", 0xFF2563EB.toInt()) {
             pushLog(onStatus?.invoke() ?: statusText)
         }
 
@@ -147,7 +149,7 @@ class FloatingOverlayService : Service() {
 
         panel.addView(title)
         panel.addView(statusLine)
-        panel.addView(start)
+        panel.addView(talk)
         panel.addView(stop)
         panel.addView(status)
         panel.addView(logScroll)

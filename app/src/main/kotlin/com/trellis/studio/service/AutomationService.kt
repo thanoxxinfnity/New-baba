@@ -179,6 +179,88 @@ class AutomationService : AccessibilityService() {
         return runCatching { startActivity(intent) }.isSuccess
     }
 
+    /**
+     * Launches an app by a loose name — "chrome", "whatsapp", "godot". The
+     * brain rarely knows exact package names, so the label is matched instead,
+     * preferring an exact match before a contains. Returns the package it opened,
+     * or null if nothing matched.
+     */
+    fun launchByName(name: String): String? {
+        val query = name.trim().lowercase()
+        if (query.isEmpty()) return null
+        val apps = installedApps()
+        val exact = apps.firstOrNull { it.second.equals(query, true) }
+        val hit = exact ?: apps.firstOrNull { it.second.contains(query, true) }
+            ?: apps.firstOrNull { it.first.contains(query, true) }
+            ?: return null
+        return if (launchApp(hit.first)) hit.first else null
+    }
+
+    /** (package, lowercase label) for every launchable app. */
+    private fun installedApps(): List<Pair<String, String>> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return packageManager.queryIntentActivities(intent, 0).map {
+            val pkg = it.activityInfo.packageName
+            pkg to it.loadLabel(packageManager).toString().lowercase()
+        }
+    }
+
+    // --------------------------------------------------------- screen reading
+
+    /** One interactable thing on screen, with the point that taps its centre. */
+    data class ScreenElement(
+        val text: String,
+        val cx: Int,
+        val cy: Int,
+        val clickable: Boolean,
+        val editable: Boolean,
+    )
+
+    /**
+     * The brain's eyes: every labelled or interactable node currently on screen,
+     * with the coordinates that would tap it. Without this the model is guessing
+     * at blind x/y; with it, it can say "click the node that reads Login".
+     */
+    fun snapshot(limit: Int = 45): List<ScreenElement> {
+        val root = rootInActiveWindow ?: return emptyList()
+        val out = ArrayList<ScreenElement>()
+        val seen = HashSet<String>()
+        collect(root, out, seen, limit)
+        return out
+    }
+
+    private fun collect(
+        node: AccessibilityNodeInfo?,
+        out: MutableList<ScreenElement>,
+        seen: MutableSet<String>,
+        limit: Int,
+    ) {
+        if (node == null || out.size >= limit) return
+        val label = (node.text?.toString()?.takeIf { it.isNotBlank() }
+            ?: node.contentDescription?.toString())?.trim().orEmpty()
+        val useful = node.isVisibleToUser && (label.isNotEmpty() || node.isEditable)
+        if (useful) {
+            val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+            if (bounds.width() > 0 && bounds.height() > 0) {
+                val shown = label.take(60).ifBlank { if (node.isEditable) "(input field)" else "" }
+                val key = "$shown@${bounds.centerX()},${bounds.centerY()}"
+                if (shown.isNotEmpty() && seen.add(key)) {
+                    out += ScreenElement(
+                        text = shown,
+                        cx = bounds.centerX(),
+                        cy = bounds.centerY(),
+                        clickable = node.isClickable,
+                        editable = node.isEditable,
+                    )
+                }
+            }
+        }
+        for (i in 0 until node.childCount) collect(node.getChild(i), out, seen, limit)
+    }
+
+    /** The foreground package, so the brain knows which app it is looking at. */
+    fun currentPackage(): String? = rootInActiveWindow?.packageName?.toString()
+
     companion object {
         /** The live service, or null until the user enables it in Settings. */
         @Volatile
