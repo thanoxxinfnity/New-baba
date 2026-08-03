@@ -43,6 +43,13 @@ class AppPrefs(private val context: Context) {
         // canvases): the agent screenshots and this model reads where to tap.
         val DEFAULT_AGENT_VISION = "meta/llama-3.2-90b-vision-instruct"
 
+        val KEY_GAME_MODEL       = stringPreferencesKey("game_model")
+        // Writes the whole game as one GDScript file. Measured against the live
+        // API on a real "collect the coins" build, GLM produced clean, valid
+        // Godot 4 code (CharacterBody3D, move_and_slide, guarded GLB loads) where
+        // the others slipped in fences or Godot 3 syntax.
+        val DEFAULT_GAME_MODEL   = "z-ai/glm-5.2"
+
         val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
         val DEFAULT_IMG     = "pollinations/flux"
         val DEFAULT_3D      = "nvidia"
@@ -75,6 +82,7 @@ class AppPrefs(private val context: Context) {
     val agentUrl: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_URL] ?: "" }
     val agentModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_MODEL] ?: DEFAULT_AGENT_MODEL }
     val agentVisionModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_VISION] ?: DEFAULT_AGENT_VISION }
+    val gameModel: Flow<String> = ds.data.catchIO().map { it[KEY_GAME_MODEL] ?: DEFAULT_GAME_MODEL }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
@@ -94,6 +102,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setAgentUrl(v: String) = ds.edit { it[KEY_AGENT_URL] = v.trim() }
     suspend fun setAgentModel(v: String) = ds.edit { it[KEY_AGENT_MODEL] = v }
     suspend fun setAgentVisionModel(v: String) = ds.edit { it[KEY_AGENT_VISION] = v }
+    suspend fun setGameModel(v: String) = ds.edit { it[KEY_GAME_MODEL] = v }
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
 }
 

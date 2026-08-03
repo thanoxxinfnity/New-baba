@@ -56,6 +56,7 @@ sealed class NavRoute(
     object Animate : NavRoute("animate", "Animate", Icons.Outlined.Animation, Icons.Filled.Animation)
     object Artifacts : NavRoute("artifacts", "Builds", Icons.Outlined.Android, Icons.Filled.Android)
     object Agent : NavRoute("agent", "Agent", Icons.Outlined.SmartToy, Icons.Filled.SmartToy)
+    object Game : NavRoute("game", "Game", Icons.Outlined.SportsEsports, Icons.Filled.SportsEsports)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
@@ -73,6 +74,7 @@ val drawerEntries = listOf(
     DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
+    DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
     DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "NVIDIA cloud TTS and voice cloning", "Workspace"),
 
     DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
@@ -241,6 +243,12 @@ fun MainContent() {
                         )
                     }
                     composable(NavRoute.Agent.route) { AgentScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Game.route) {
+                        GameScreen(
+                            onMenu = openDrawer,
+                            onCreateModel = { go(NavRoute.Generate.route) },
+                        )
+                    }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
 
                     // The image viewer existed but had no route, so tapping a
