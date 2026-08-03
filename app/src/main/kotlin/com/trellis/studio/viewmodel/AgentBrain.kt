@@ -18,7 +18,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 
 /**
  * VOID's own agent: you tell it what you want in plain words, and it drives the
@@ -129,10 +131,16 @@ object AgentBrain {
             delay(LAUNCH_SETTLE_MS)
         }
 
+        // No step cap: a real task — building a game, filling a long form — can
+        // take hundreds of moves, so the agent runs until it is done, needs to
+        // ask, gets stuck, or the user stops it. Coroutine cancellation from
+        // stop() ends the loop; the stuck and repeated-failure guards below keep
+        // it from spinning forever on its own.
         var steps = 0
         var lastFailed = false
+        var failStreak = 0
         val recent = ArrayDeque<String>()
-        while (steps < MAX_STEPS) {
+        while (coroutineContext.isActive) {
             steps++
 
             // Choose eyes for this turn. Most apps expose accessibility text, which
@@ -188,19 +196,25 @@ object AgentBrain {
                     if (isTap) { FloatingOverlayService.hideBubble(); delay(60) }
                     val result = execute(service, action)
                     if (isTap) { delay(40); FloatingOverlayService.showBubble() }
-                    lastFailed = result.startsWith("no ") || result.contains("couldn't") ||
+                    val failed = result.startsWith("no ") || result.contains("couldn't") ||
                         result.contains("failed")
+                    lastFailed = failed
+                    failStreak = if (failed) failStreak + 1 else 0
                     add(Role.ACTION, "${describe(action)} → $result")
 
-                    // Stuck-detection: the same action over and over — usually a
-                    // failing tap the model keeps retrying — is a loop, not
-                    // progress. Bail and hand back to the user instead of burning
-                    // through every step doing nothing.
+                    // Two guards, since there is no step cap. The same action over
+                    // and over is a tight loop; a long run of failures of any kind
+                    // means it has lost the thread. Either hands back to the user
+                    // rather than spinning — but ordinary progress runs forever.
                     val signature = "${action.type}|${action.text}|${action.query}|$result"
                     recent.addLast(signature)
                     if (recent.size > STUCK_WINDOW) recent.removeFirst()
                     if (recent.size == STUCK_WINDOW && recent.all { it == signature }) {
-                        say("I'm stuck repeating the same step and not getting anywhere. Tell me what to do differently, or open the app you meant and I'll take it from there.")
+                        say("I'm repeating the same step without progress. Tell me what to do differently, or open the right screen and I'll carry on.")
+                        return
+                    }
+                    if (failStreak >= MAX_FAIL_STREAK) {
+                        say("The last several steps didn't land. I'll pause — say \"carry on\" once the screen looks right, or tell me the next move.")
                         return
                     }
 
@@ -211,7 +225,6 @@ object AgentBrain {
                 }
             }
         }
-        say("That's $MAX_STEPS steps done. I'll pause here — say \"carry on\" and I'll keep going.")
     }
 
     /** Builds the model input: the rules, the conversation, and the live screen. */
@@ -372,7 +385,11 @@ object AgentBrain {
     }
 
     private fun add(role: Role, text: String) {
-        _transcript.value = _transcript.value + Message(role, text)
+        // With no step cap a run can produce thousands of lines; keep the visible
+        // transcript to a rolling tail so a long build doesn't grow memory without
+        // bound. The model's own context is trimmed separately in buildTurns.
+        val next = _transcript.value + Message(role, text)
+        _transcript.value = if (next.size > MAX_TRANSCRIPT) next.takeLast(MAX_TRANSCRIPT) else next
         FloatingOverlayService.log(
             when (role) {
                 Role.USER -> "you: $text"
@@ -509,7 +526,6 @@ object AgentBrain {
         return s.length
     }
 
-    private const val MAX_STEPS = 40
     // A shorter window keeps the prompt small, which lowers first-token latency —
     // the recent past is what matters for the next tap, not the whole run.
     private const val MAX_HISTORY = 14
@@ -517,6 +533,10 @@ object AgentBrain {
     private const val LAUNCH_SETTLE_MS = 650L
     /** Identical action this many times in a row means it is stuck, not working. */
     private const val STUCK_WINDOW = 3
+    /** This many failed actions in a row means it has lost the thread; hand back. */
+    private const val MAX_FAIL_STREAK = 8
+    /** Rolling cap on the on-screen transcript so a long run stays bounded. */
+    private const val MAX_TRANSCRIPT = 400
     /** Below this many readable elements, the screen is treated as custom-drawn. */
     private const val VISION_MIN_ELEMENTS = 2
     /** Screenshots are downscaled to this width before going to the vision model. */
