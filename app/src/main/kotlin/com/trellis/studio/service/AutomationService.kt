@@ -296,6 +296,9 @@ class AutomationService : AccessibilityService() {
                 }
 
                 override fun onFailure(errorCode: Int) {
+                    // Surface the reason on the bubble so a capture problem is
+                    // visible instead of a silent "couldn't do it".
+                    FloatingOverlayService.log("screenshot failed (code $errorCode)")
                     exec.shutdown()
                     if (cont.isActive) cont.resume(null)
                 }

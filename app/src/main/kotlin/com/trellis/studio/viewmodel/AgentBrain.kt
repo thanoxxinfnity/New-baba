@@ -143,20 +143,23 @@ object AgentBrain {
         while (coroutineContext.isActive) {
             steps++
 
-            // Choose eyes for this turn. Most apps expose accessibility text, which
-            // is fast and exact. An app that draws its own UI — Godot, a game, a
-            // canvas — exposes almost nothing, so when the reading is sparse (or
-            // the last text-mode action just failed on such a screen) the agent
-            // screenshots and a vision model decides where to tap instead.
+            // Choose eyes for this turn. Text (accessibility) is the default: it
+            // is fast, exact, and lets the model open apps and use normal menus.
+            // Vision is the fallback for a screen that draws its own UI — Godot, a
+            // game, a canvas — and is only reached once a text-mode action has
+            // actually failed there. Triggering it on an empty launcher (which is
+            // what happened) was wrong: on the home screen the model should just
+            // launch the target app, not screenshot.
             val onVoid = service.currentPackage() == app.packageName
-            val elementCount = if (onVoid) 1 else service.snapshot(limit = 6).size
-            val useVision = !onVoid &&
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                (elementCount < VISION_MIN_ELEMENTS || lastFailed)
+            val useVision = !onVoid && lastFailed &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
-            val action = if (useVision) {
-                visionAction(app, service, apiKey, visionModel)
-            } else {
+            var action = if (useVision) visionAction(app, service, apiKey, visionModel) else null
+
+            // Text mode is used normally, and also as a fallback when a screenshot
+            // could not be taken — better to try the menus that do expose text than
+            // to dead-end.
+            if (action == null) {
                 val turns = buildTurns(app, service)
                 val reply = nim.chat(
                     apiKey = apiKey,
@@ -170,7 +173,7 @@ object AgentBrain {
                     add(Role.ERROR, err.message ?: "The model did not respond.")
                     return
                 }
-                parseAction(reply.content.ifBlank { reply.reasoning.orEmpty() })
+                action = parseAction(reply.content.ifBlank { reply.reasoning.orEmpty() })
             }
 
             if (action == null) {
@@ -293,10 +296,17 @@ object AgentBrain {
         FloatingOverlayService.collapse()
         FloatingOverlayService.hideBubble()
         delay(140)   // let the overlay leave the frame before capturing
-        val shot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) service.takeShot() else null
+        // One retry: the screenshot API is rate-limited and occasionally returns
+        // nothing on the first call right after the screen changed.
+        var shot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) service.takeShot() else null
+        if (shot == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            delay(500)
+            shot = service.takeShot()
+        }
         FloatingOverlayService.showBubble()
         if (shot == null) {
-            add(Role.ERROR, "Couldn't capture the screen (needs Android 11+).")
+            // Not fatal: return null so the caller falls back to reading text.
+            FloatingOverlayService.log("screenshot unavailable — using text mode")
             return null
         }
 
@@ -537,8 +547,6 @@ object AgentBrain {
     private const val MAX_FAIL_STREAK = 8
     /** Rolling cap on the on-screen transcript so a long run stays bounded. */
     private const val MAX_TRANSCRIPT = 400
-    /** Below this many readable elements, the screen is treated as custom-drawn. */
-    private const val VISION_MIN_ELEMENTS = 2
     /** Screenshots are downscaled to this width before going to the vision model. */
     private const val VISION_MAX_WIDTH = 1080
 
