@@ -265,6 +265,7 @@ fun MainContent() {
                             title = entry.arguments?.getString("name").orEmpty().decodeArg()
                                 .ifBlank { "Image" },
                             onBack = { navController.popBackStack() },
+                            onEdited = { path, name -> navController.openImage(path, name) },
                         )
                     }
 

@@ -20,10 +20,19 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.trellis.studio.data.db.AppDatabase
+import com.trellis.studio.data.entity.GenerationEntity
+import com.trellis.studio.data.prefs.AppPrefs
+import com.trellis.studio.network.FalImageClient
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
 
@@ -37,9 +46,16 @@ fun ImageViewerScreen(
     imagePath: String,
     title: String = "Image",
     onBack: () -> Unit = {},
+    /** Opens the freshly edited image (a new file) in the viewer. */
+    onEdited: (path: String, name: String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val file = remember(imagePath) { File(imagePath) }
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+
+    var showEdit by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -59,6 +75,7 @@ fun ImageViewerScreen(
 
     Scaffold(
         containerColor = Color.Black,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             AnimatedVisibility(visible = showChrome) {
                 TopAppBar(
@@ -78,6 +95,9 @@ fun ImageViewerScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { if (file.exists()) showEdit = true }) {
+                            Icon(Icons.Default.AutoFixHigh, "Edit with AI", tint = Cyan)
+                        }
                         IconButton(onClick = {
                             if (file.exists()) FileExport.share(context, file, "image/*")
                         }) { Icon(Icons.Default.Share, "Share", tint = TextSecondary) }
@@ -137,6 +157,18 @@ fun ImageViewerScreen(
                     ),
             )
 
+            if (editing) {
+                Column(
+                    Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CircularProgressIndicator(color = Cyan)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Editing the image…", color = TextPrimary,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
             // Zoom readout + reset, only once zoomed in
             AnimatedVisibility(
                 visible = showChrome && abs(scale - 1f) > 0.02f,
@@ -160,6 +192,108 @@ fun ImageViewerScreen(
                     ) { Text("Reset", color = TextSecondary, style = MaterialTheme.typography.labelMedium) }
                 }
             }
+        }
+    }
+
+    if (showEdit) {
+        EditSheet(
+            busy = editing,
+            onDismiss = { if (!editing) showEdit = false },
+            onEdit = { prompt ->
+                editing = true
+                scope.launch {
+                    val prefs = AppPrefs(context)
+                    val falKey = prefs.falKey.first()
+                    FalImageClient().edit(falKey, file, prompt, FileExport.outputDir(context))
+                        .onSuccess { out ->
+                            val name = "$title · edited"
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    AppDatabase.get(context.applicationContext as android.app.Application)
+                                        .generationDao()
+                                        .insert(GenerationEntity(type = "image", prompt = name,
+                                            modelPath = out.absolutePath))
+                                }
+                            }
+                            editing = false
+                            showEdit = false
+                            onEdited(out.absolutePath, name)
+                        }
+                        .onFailure {
+                            editing = false
+                            snackbar.showSnackbar(it.message ?: "Couldn't edit the image.")
+                        }
+                }
+            },
+        )
+    }
+}
+
+/** A prompt sheet for image-to-image editing. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditSheet(
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: (String) -> Unit,
+) {
+    var prompt by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = SurfDark) {
+        Column(
+            Modifier.fillMaxWidth().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AutoFixHigh, null, tint = Cyan, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Edit this image", style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                "Say what to change and the image is edited, keeping the rest — like " +
+                    "\"make it night\", \"add a red hat\", \"turn the car blue\".",
+                style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+            )
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = { prompt = it },
+                enabled = !busy,
+                placeholder = { Text("make it snow", color = TextDisabled,
+                    style = MaterialTheme.typography.bodySmall) },
+                textStyle = MaterialTheme.typography.bodyMedium,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Cyan, unfocusedBorderColor = BorderDark,
+                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary,
+                    cursorColor = Cyan,
+                ),
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { onEdit(prompt) },
+                enabled = !busy && prompt.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Purple40, disabledContainerColor = CardHigh),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = TextPrimary, strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp),
+                        tint = if (prompt.isNotBlank()) TextPrimary else TextDisabled)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Edit image",
+                        color = if (prompt.isNotBlank()) TextPrimary else TextDisabled)
+                }
+            }
+            Text(
+                "Uses fal.ai FLUX Kontext — needs a fal.ai key in Settings (free starting " +
+                    "credits). The free generators can't edit an uploaded image.",
+                style = MaterialTheme.typography.labelSmall, color = TextDisabled,
+            )
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
