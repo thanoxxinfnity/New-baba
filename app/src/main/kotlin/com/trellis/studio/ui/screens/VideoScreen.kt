@@ -39,9 +39,11 @@ fun VideoScreen(
     val built by vm.built.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
+    val serverReady by vm.serverReady.collectAsStateWithLifecycle()
     var idea by remember { mutableStateOf("") }
     var style by remember { mutableStateOf("Anime") }
     var seconds by remember { mutableFloatStateOf(20f) }
+    var realMotion by remember { mutableStateOf(false) }
 
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.consumeMessage() } }
 
@@ -131,8 +133,36 @@ fun VideoScreen(
                     color = TextDisabled, style = MaterialTheme.typography.labelSmall,
                 )
 
+                // Real motion — only offered once a GPU server URL is set.
+                Row(
+                    Modifier.fillMaxWidth()
+                        .glass(glow = if (realMotion) Teal else Purple40).padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (serverReady) Icons.Default.Bolt else Icons.Default.CloudOff,
+                        null, tint = if (serverReady) Teal else TextDisabled, modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Real motion", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (serverReady) "Real AI video from your GPU server, clip per scene"
+                            else "Set a video server URL in Settings (free Kaggle GPU) to enable",
+                            color = if (serverReady) Teal else TextDisabled,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    Switch(
+                        checked = realMotion && serverReady,
+                        onCheckedChange = { realMotion = it },
+                        enabled = serverReady && !busy,
+                        colors = SwitchDefaults.colors(checkedThumbColor = Teal, checkedTrackColor = Teal.copy(alpha = 0.4f)),
+                    )
+                }
+
                 Button(
-                    onClick = { vm.create(idea, style, seconds.toInt()) },
+                    onClick = { vm.create(idea, style, seconds.toInt(), realMotion && serverReady) },
                     enabled = !busy && idea.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = Purple40, disabledContainerColor = CardHigh),
                     shape = RoundedCornerShape(14.dp),

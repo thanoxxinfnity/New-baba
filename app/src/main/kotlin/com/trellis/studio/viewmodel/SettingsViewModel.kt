@@ -14,6 +14,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val falKey      = prefs.falKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val pollKey     = prefs.pollKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val youtubeKey  = prefs.youtubeKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val videoServerUrl = prefs.videoServerUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val selectedLlm = prefs.selectedLlm.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_LLM)
     val selectedImg = prefs.selectedImg.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_IMG)
     val selected3d  = prefs.selected3d.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_3D)
@@ -28,6 +29,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setFalKey(v: String)       = viewModelScope.launch { prefs.setFalKey(v.trim()) }
     fun setPollKey(v: String)      = viewModelScope.launch { prefs.setPollKey(v.trim()) }
     fun setYoutubeKey(v: String)   = viewModelScope.launch { prefs.setYoutubeKey(v.trim()) }
+    fun setVideoServerUrl(v: String) = viewModelScope.launch { prefs.setVideoServerUrl(v.trim()) }
     fun setSelectedLlm(v: String)  = viewModelScope.launch { prefs.setSelectedLlm(v) }
     fun setSelectedImg(v: String)  = viewModelScope.launch { prefs.setSelectedImg(v) }
     fun setSelected3d(v: String)   = viewModelScope.launch { prefs.setSelected3d(v) }

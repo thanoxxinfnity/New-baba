@@ -31,6 +31,7 @@ fun SettingsScreen(
     val falKey by vm.falKey.collectAsStateWithLifecycle()
     val pollKey by vm.pollKey.collectAsStateWithLifecycle()
     val youtubeKey by vm.youtubeKey.collectAsStateWithLifecycle()
+    val videoServerUrl by vm.videoServerUrl.collectAsStateWithLifecycle()
     val systemPrompt by vm.systemPrompt.collectAsStateWithLifecycle()
     val maxTokens by vm.maxTokens.collectAsStateWithLifecycle()
     val temperature by vm.temperature.collectAsStateWithLifecycle()
@@ -77,6 +78,15 @@ fun SettingsScreen(
                     description = "Optional — lets Video Studio take style cues from popular " +
                         "videos. It searches YouTube; it does not generate video.",
                     onSave = vm::setYoutubeKey,
+                )
+                ApiKeyField(
+                    label = "Video server URL",
+                    value = videoServerUrl,
+                    hint = "https://xxxx.trycloudflare.com",
+                    description = "Optional — for real motion video. Run the VOID Kaggle " +
+                        "notebook (free GPU), paste the public URL it prints here, then turn " +
+                        "on \"Real motion\" in Video Studio.",
+                    onSave = vm::setVideoServerUrl,
                 )
             }
 
