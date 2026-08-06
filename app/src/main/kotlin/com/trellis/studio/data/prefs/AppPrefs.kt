@@ -43,6 +43,7 @@ class AppPrefs(private val context: Context) {
         // canvases): the agent screenshots and this model reads where to tap.
         val DEFAULT_AGENT_VISION = "meta/llama-3.2-90b-vision-instruct"
 
+        val KEY_YT_API           = stringPreferencesKey("youtube_api_key")
         val KEY_GAME_MODEL       = stringPreferencesKey("game_model")
         // Writes the whole game as one GDScript file. Measured against the live
         // API on a real "collect the coins" build, GLM produced clean, valid
@@ -83,6 +84,7 @@ class AppPrefs(private val context: Context) {
     val agentModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_MODEL] ?: DEFAULT_AGENT_MODEL }
     val agentVisionModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_VISION] ?: DEFAULT_AGENT_VISION }
     val gameModel: Flow<String> = ds.data.catchIO().map { it[KEY_GAME_MODEL] ?: DEFAULT_GAME_MODEL }
+    val youtubeKey: Flow<String> = ds.data.catchIO().map { it[KEY_YT_API] ?: "" }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
@@ -103,6 +105,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setAgentModel(v: String) = ds.edit { it[KEY_AGENT_MODEL] = v }
     suspend fun setAgentVisionModel(v: String) = ds.edit { it[KEY_AGENT_VISION] = v }
     suspend fun setGameModel(v: String) = ds.edit { it[KEY_GAME_MODEL] = v }
+    suspend fun setYoutubeKey(v: String) = ds.edit { it[KEY_YT_API] = v.trim() }
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
 }
 

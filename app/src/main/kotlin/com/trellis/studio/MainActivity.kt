@@ -57,6 +57,7 @@ sealed class NavRoute(
     object Artifacts : NavRoute("artifacts", "Builds", Icons.Outlined.Android, Icons.Filled.Android)
     object Agent : NavRoute("agent", "Agent", Icons.Outlined.SmartToy, Icons.Filled.SmartToy)
     object Game : NavRoute("game", "Game", Icons.Outlined.SportsEsports, Icons.Filled.SportsEsports)
+    object Video : NavRoute("video", "Video", Icons.Outlined.Movie, Icons.Filled.Movie)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
@@ -75,6 +76,7 @@ val drawerEntries = listOf(
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
     DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
+    DrawerEntry("video", "Video Studio", Icons.Filled.Movie, "Text → a real video, scene by scene", "Workspace"),
     DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "NVIDIA cloud TTS and voice cloning", "Workspace"),
 
     DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
@@ -249,6 +251,7 @@ fun MainContent() {
                             onCreateModel = { go(NavRoute.Generate.route) },
                         )
                     }
+                    composable(NavRoute.Video.route) { VideoScreen(onMenu = openDrawer) }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
 
                     // The image viewer existed but had no route, so tapping a

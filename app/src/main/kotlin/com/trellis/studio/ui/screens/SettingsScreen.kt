@@ -30,6 +30,7 @@ fun SettingsScreen(
     val hinglish by vm.hinglishThinking.collectAsStateWithLifecycle()
     val falKey by vm.falKey.collectAsStateWithLifecycle()
     val pollKey by vm.pollKey.collectAsStateWithLifecycle()
+    val youtubeKey by vm.youtubeKey.collectAsStateWithLifecycle()
     val systemPrompt by vm.systemPrompt.collectAsStateWithLifecycle()
     val maxTokens by vm.maxTokens.collectAsStateWithLifecycle()
     val temperature by vm.temperature.collectAsStateWithLifecycle()
@@ -68,6 +69,14 @@ fun SettingsScreen(
                     hint = "Optional",
                     description = "Optional — Pollinations FLUX is free without a key.",
                     onSave = vm::setPollKey,
+                )
+                ApiKeyField(
+                    label = "YouTube Data API Key",
+                    value = youtubeKey,
+                    hint = "AIza…",
+                    description = "Optional — lets Video Studio take style cues from popular " +
+                        "videos. It searches YouTube; it does not generate video.",
+                    onSave = vm::setYoutubeKey,
                 )
             }
 
