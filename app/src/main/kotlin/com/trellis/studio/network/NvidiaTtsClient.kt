@@ -152,7 +152,7 @@ class NvidiaTtsClient {
             raw.copy(pcm = raw.pcm.copyOfRange(start, (start + keep).coerceAtMost(raw.pcm.size)))
         } else raw
 
-        return call(apiKey, Functions.ZERO_SHOT, timeoutSeconds = CLONE_TIMEOUT_SECONDS) { stub ->
+        val block: (RivaSpeechSynthesisGrpc.RivaSpeechSynthesisBlockingStub) -> ByteArray = { stub ->
             val zeroShot = ZeroShotData.newBuilder()
                 .setAudioPrompt(ByteString.copyFrom(wav.pcm))
                 .setSampleRateHz(wav.sampleRate)
@@ -170,6 +170,20 @@ class NvidiaTtsClient {
                 .build()
             wrapWav(stub.synthesize(request).audio.toByteArray(), sampleRateHz)
         }
+
+        // The zero-shot function scales to zero when idle, so the first call after
+        // a quiet spell cold-starts and can blow past a short deadline — which is
+        // what surfaced as "voice cloning is down". A second attempt hits a warm
+        // worker and returns in ~2s. So try once on a long deadline, and retry on
+        // a timeout/unavailable before giving up. (Verified live: warm calls
+        // answer in 2-3s across 16k/48k/stereo samples.)
+        val first = call(apiKey, Functions.ZERO_SHOT, timeoutSeconds = CLONE_TIMEOUT_SECONDS, body = block)
+        if (first.isSuccess) return first
+        val transient = first.exceptionOrNull()?.message?.let { m ->
+            m.contains("down", true) || m.contains("unavailable", true) || m.contains("Try again", true)
+        } == true
+        return if (transient) call(apiKey, Functions.ZERO_SHOT, timeoutSeconds = CLONE_TIMEOUT_SECONDS, body = block)
+        else first
     }
 
     /** Shared plumbing: build channel, run the call, always shut the channel down. */
@@ -205,13 +219,12 @@ class NvidiaTtsClient {
             io.grpc.Status.Code.PERMISSION_DENIED ->
                 "NVIDIA API key rejected. Check it in Settings."
             io.grpc.Status.Code.DEADLINE_EXCEEDED ->
-                // Measured against the live service: the zero-shot worker accepts
-                // the call and never answers, for cloning *and* for plain text on
-                // the same function, while the other voice models reply in ~2s.
-                // Nothing about the sample or the request changes it.
-                "NVIDIA's voice-cloning model is down — it accepts the job and never " +
-                    "answers. Your sample is fine and stays saved. The built-in voices " +
-                    "still work; try cloning again later."
+                // The zero-shot worker cold-starts from zero on the first call, so
+                // this is usually a warm-up timeout rather than a real outage. The
+                // caller retries once; if it still times out, the worker is slow
+                // right now. The sample stays saved.
+                "The voice-cloning model is warming up and took too long. Try again " +
+                    "in a moment — your sample is saved."
 
             io.grpc.Status.Code.UNAVAILABLE ->
                 "NVIDIA's voice service is unavailable right now. Try again shortly."
@@ -253,7 +266,9 @@ class NvidiaTtsClient {
         // Cloning either answers reasonably fast or not at all: a healthy Riva
         // voice model returns in a couple of seconds, so waiting out a full
         // minute only buys the user a longer spinner before the same failure.
-        const val CLONE_TIMEOUT_SECONDS = 40L
+        // Long enough to sit through an NVCF cold start (the worker spins up from
+        // zero on the first call), not just a warm ~2s response.
+        const val CLONE_TIMEOUT_SECONDS = 90L
         // Hard limits reported by the zero-shot model itself.
         const val MIN_PROMPT_SECONDS = 3f
         const val MAX_PROMPT_SECONDS = 9f

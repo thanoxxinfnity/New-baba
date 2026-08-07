@@ -98,16 +98,33 @@ class ImageGenClient(private val context: Context) {
         val encoded = URLEncoder.encode(prompt, "UTF-8")
         val seedParam = if (seed != 0L) "&seed=$seed" else ""
         val url = "https://image.pollinations.ai/prompt/$encoded?width=$width&height=$height$seedParam&model=flux"
-        val reqBuilder = Request.Builder().url(url).get()
-        if (apiKey.isNotBlank()) reqBuilder.header("Authorization", "Bearer $apiKey")
-        runCatching {
-            client.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) throw Exception("Pollinations error (${response.code})")
-                val bytes = response.body?.bytes() ?: throw Exception("Image generation returned no data.")
-                saveBitmapBytes(bytes, "poll_${System.currentTimeMillis()}")
+
+        // Pollinations is free and flaky: measured, roughly one request in five
+        // hangs to a timeout or returns a 5xx, and the next one succeeds. So the
+        // fix for the "image generation error" the user saw is to just retry the
+        // transient failures rather than surface them.
+        var last: Exception? = null
+        repeat(3) { attempt ->
+            val reqBuilder = Request.Builder().url(url).get()
+            if (apiKey.isNotBlank()) reqBuilder.header("Authorization", "Bearer $apiKey")
+            try {
+                val path = client.newCall(reqBuilder.build()).execute().use { response ->
+                    if (!response.isSuccessful) throw Exception("Pollinations busy (${response.code})")
+                    val bytes = response.body?.bytes()
+                        ?.takeIf { it.size > 512 } ?: throw Exception("Empty image — retrying.")
+                    saveBitmapBytes(bytes, "poll_${System.currentTimeMillis()}")
+                }
+                return@withContext Result.success(path)
+            } catch (e: Exception) {
+                last = e
+                if (attempt < 2) kotlinx.coroutines.delay(1500L * (attempt + 1))
             }
-        }.recoverWithMessage()
+        }
+        Result.failure(last?.let { friendlyPollinations(it) } ?: Exception("Image generation failed."))
     }
+
+    private fun friendlyPollinations(e: Exception): Exception =
+        Exception("The free image service is busy right now — please try again in a moment.")
 
     private fun handleImageResponse(response: Response, prefix: String): String {
         val body = response.body?.string() ?: ""
