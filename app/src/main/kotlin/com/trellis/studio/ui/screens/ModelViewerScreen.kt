@@ -15,7 +15,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
@@ -26,6 +30,7 @@ import com.trellis.studio.util.FileExport
 import com.trellis.studio.util.AndroidTextureScaler
 import com.trellis.studio.util.MeshSimplifier
 import com.trellis.studio.util.ModelExporter
+import com.trellis.studio.util.ViewportRecorder
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.Scene
 import io.github.sceneview.node.ModelNode
@@ -89,6 +94,12 @@ fun ModelViewerScreen(
     val file = remember(currentPath) { File(currentPath) }
     val hasAnimation = clipNames.isNotEmpty()
 
+    // For recording: the viewport's bounds in window pixels, and the host window.
+    val hostView = LocalView.current
+    var sceneBounds by remember { mutableStateOf(android.graphics.Rect()) }
+    var recording by remember { mutableStateOf(false) }
+    var recordProgress by remember { mutableFloatStateOf(0f) }
+
     LaunchedEffect(currentPath) {
         size = withContext(Dispatchers.IO) { MeshSimplifier.measure(file) }
         loading = true
@@ -143,11 +154,14 @@ fun ModelViewerScreen(
                         Text(currentName, style = MaterialTheme.typography.titleMedium, color = TextPrimary, maxLines = 1)
                         Text(
                             buildString {
-                                append(if (file.exists()) FileExport.humanSize(file.length()) else "missing")
-                                if (hasAnimation) append(" · ${clipNames.joinToString(", ")}")
+                                if (recording) append("● Recording ${(recordProgress * 100).toInt()}%")
+                                else {
+                                    append(if (file.exists()) FileExport.humanSize(file.length()) else "missing")
+                                    if (hasAnimation) append(" · ${clipNames.joinToString(", ")}")
+                                }
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (hasAnimation) Teal else TextSecondary,
+                            color = if (recording) Color(0xFFDC2626) else if (hasAnimation) Teal else TextSecondary,
                             maxLines = 1,
                         )
                     }
@@ -158,6 +172,48 @@ fun ModelViewerScreen(
                     }
                 },
                 actions = {
+                    // Record the live animation to a real .mp4.
+                    IconButton(
+                        enabled = !recording && !loading,
+                        onClick = {
+                            val window = (context as? android.app.Activity)?.window
+                            if (window == null || sceneBounds.width() <= 0) {
+                                scope.launch { snackbar.showSnackbar("Give the model a moment to load, then try again.") }
+                                return@IconButton
+                            }
+                            recording = true
+                            recordProgress = 0f
+                            autoRotate = true   // orbit while recording so it reads as motion
+                            scope.launch {
+                                val out = File(FileExport.outputDir(context), "motion_${System.currentTimeMillis()}.mp4")
+                                ViewportRecorder.record(
+                                    window = window, rect = sceneBounds,
+                                    seconds = 6f, fps = 24, output = out,
+                                    onProgress = { recordProgress = it },
+                                ).onSuccess { mp4 ->
+                                    runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            AppDatabase.get(context.applicationContext as android.app.Application)
+                                                .generationDao().insert(GenerationEntity(
+                                                    type = "video",
+                                                    prompt = "${currentName.substringBefore(" · ")} · motion",
+                                                    modelPath = mp4.absolutePath))
+                                        }
+                                    }
+                                    recording = false
+                                    FileExport.share(context, mp4, "video/mp4")
+                                }.onFailure {
+                                    recording = false
+                                    snackbar.showSnackbar(it.message ?: "Recording failed.")
+                                }
+                            }
+                        },
+                    ) {
+                        Icon(
+                            if (recording) Icons.Default.FiberManualRecord else Icons.Default.Videocam,
+                            "Record video", tint = if (recording) Color(0xFFDC2626) else Teal,
+                        )
+                    }
                     IconButton(onClick = { showAnimate = true }) {
                         Icon(Icons.Default.Animation, "Animate", tint = Pink)
                     }
@@ -180,7 +236,12 @@ fun ModelViewerScreen(
 
             if (error == null) {
                 Scene(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().onGloballyPositioned {
+                        val b = it.boundsInWindow()
+                        sceneBounds = android.graphics.Rect(
+                            b.left.toInt(), b.top.toInt(), b.right.toInt(), b.bottom.toInt(),
+                        )
+                    },
                     engine = engine,
                     modelLoader = modelLoader,
                     cameraNode = cameraNode,
@@ -200,6 +261,7 @@ fun ModelViewerScreen(
                     Text("Loading model…", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
                 }
             }
+
 
             error?.let { msg ->
                 Column(
