@@ -71,8 +71,32 @@ fun LiveVoiceScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Live Voice", style = MaterialTheme.typography.titleLarge.copy(brush = NeonBrush),
                         fontWeight = FontWeight.SemiBold)
-                    Text("Talk to the AI out loud · ${state.voiceLabel}",
-                        style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    // The reply voice — tap to change.
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = !state.running) { menu = true }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.RecordVoiceOver, null, tint = Cyan, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(state.voiceLabel, style = MaterialTheme.typography.labelSmall, color = Cyan)
+                            Icon(Icons.Default.ArrowDropDown, null, tint = Cyan, modifier = Modifier.size(16.dp))
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            state.voices.forEach { v ->
+                                DropdownMenuItem(
+                                    text = { Text(v.label) },
+                                    onClick = { vm.setVoice(v.key); menu = false },
+                                    trailingIcon = {
+                                        if (v.key == state.voiceKey)
+                                            Icon(Icons.Default.Check, null, tint = Cyan, modifier = Modifier.size(16.dp))
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
                 if (state.lines.isNotEmpty()) {
                     IconButton(onClick = { vm.clear() }) {

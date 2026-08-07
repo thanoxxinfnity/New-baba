@@ -38,6 +38,7 @@ fun VoiceScreen(
     onMenu: () -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showVoiceSheet by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
 
@@ -231,6 +232,25 @@ fun VoiceScreen(
                         cursorColor = Cyan,
                     ),
                 )
+                // Expression tags — the model speaks these as real sounds. Tap to
+                // drop one into the text where you want it.
+                Row(
+                    Modifier.fillMaxWidth()
+                        .horizontalScroll(androidx.compose.foundation.rememberScrollState())
+                        .padding(start = 6.dp, end = 6.dp, bottom = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf(
+                        "😂 laugh" to " [laughs]", "😄 giggle" to " [laughter]",
+                        "😮 gasp" to " [gasp]", "😌 sigh" to " [sigh]", "🤔 hmm" to " [hmm]",
+                    ).forEach { (label, tag) ->
+                        AssistChip(
+                            onClick = { vm.setText((state.text.trimEnd() + tag).trim()) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                            colors = AssistChipDefaults.assistChipColors(labelColor = TextSecondary),
+                        )
+                    }
+                }
                 Row(
                     Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -379,6 +399,12 @@ fun VoiceScreen(
                                     }
                                 },
                                 onDelete = { vm.deleteVoice(v) },
+                                onShare = {
+                                    (v.previewPath ?: v.samplePath)?.let {
+                                        com.trellis.studio.util.FileExport.share(
+                                            context, java.io.File(it), "audio/wav")
+                                    }
+                                },
                             )
                         }
                     }
@@ -505,6 +531,7 @@ private fun ClonedVoiceRow(
     onSelect: () -> Unit,
     onPreview: () -> Unit,
     onDelete: () -> Unit,
+    onShare: () -> Unit = {},
 ) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onSelect).padding(horizontal = 16.dp, vertical = 10.dp),
@@ -526,6 +553,9 @@ private fun ClonedVoiceRow(
         if (selected) {
             Icon(Icons.Default.Check, null, tint = Cyan, modifier = Modifier.size(19.dp))
             Spacer(Modifier.width(6.dp))
+        }
+        IconButton(onClick = onShare, modifier = Modifier.size(30.dp)) {
+            Icon(Icons.Default.Download, "Download", tint = Teal, modifier = Modifier.size(18.dp))
         }
         IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
             Icon(Icons.Default.DeleteOutline, "Delete", tint = TextDisabled, modifier = Modifier.size(17.dp))

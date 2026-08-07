@@ -34,12 +34,17 @@ class LiveChatViewModel(app: Application) : AndroidViewModel(app) {
     enum class Role { YOU, AI }
     data class Line(val role: Role, val text: String)
 
+    /** A voice the AI can answer in: a cloned one, or a built-in Magpie voice. */
+    data class VoiceChoice(val key: String, val label: String)
+
     data class State(
         val phase: Phase = Phase.IDLE,
         val running: Boolean = false,
         val lines: List<Line> = emptyList(),
         val partial: String = "",
         val voiceLabel: String = "AI voice",
+        val voices: List<VoiceChoice> = emptyList(),
+        val voiceKey: String = "builtin:Magpie-Multilingual.EN-US.Aria",
         val error: String? = null,
     )
 
@@ -52,22 +57,34 @@ class LiveChatViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var player: MediaPlayer? = null
-    /** Which cloned voice to answer in; null uses a built-in voice. */
-    private var cloneSample: File? = null
-    private var builtInVoice = "Magpie-Multilingual.EN-US.Aria"
+
+    init {
+        // Offer built-in voices plus any cloned ones the user has made.
+        viewModelScope.launch {
+            db.voiceDao().getAll().collect { list ->
+                val choices = buildList {
+                    add(VoiceChoice("builtin:Magpie-Multilingual.EN-US.Aria", "AI · English"))
+                    add(VoiceChoice("builtin:Magpie-Multilingual.HI-IN.Sofia", "AI · Hindi"))
+                    list.filter { it.isCloned && it.samplePath != null }
+                        .forEach { add(VoiceChoice("clone:${it.id}", "Your voice · ${it.name}")) }
+                }
+                _state.value = _state.value.copy(voices = choices)
+                _state.value = _state.value.copy(
+                    voiceLabel = choices.firstOrNull { it.key == _state.value.voiceKey }?.label ?: "AI voice",
+                )
+            }
+        }
+    }
+
+    fun setVoice(key: String) {
+        val label = _state.value.voices.firstOrNull { it.key == key }?.label ?: "AI voice"
+        _state.value = _state.value.copy(voiceKey = key, voiceLabel = label)
+    }
 
     fun start() {
         if (_state.value.running) return
         _state.value = _state.value.copy(running = true, error = null)
-        viewModelScope.launch {
-            // Answer in the newest cloned voice if the user has made one.
-            val cloned = db.voiceDao().getAll().first().firstOrNull { it.isCloned && it.samplePath != null }
-            cloneSample = cloned?.samplePath?.let(::File)?.takeIf { it.exists() }
-            _state.value = _state.value.copy(
-                voiceLabel = if (cloneSample != null) "Your voice · ${cloned?.name}" else "AI voice",
-            )
-            loop()
-        }
+        viewModelScope.launch { loop() }
     }
 
     fun stop() {
@@ -126,11 +143,19 @@ class LiveChatViewModel(app: Application) : AndroidViewModel(app) {
         cont.invokeOnCancellation { VoiceIo.cancelListening() }
     }
 
-    /** Speaks [text] in the cloned voice if set, else a built-in — and waits. */
+    /** Speaks [text] in the chosen voice — a cloned one or a built-in — and waits. */
     private suspend fun speak(app: Application, apiKey: String, text: String) {
-        val wav = cloneSample?.let { sample ->
-            tts.cloneVoice(apiKey, text.take(600), sample).getOrNull()
-        } ?: tts.synthesize(apiKey, text.take(600), voiceName = builtInVoice).getOrNull()
+        val key = _state.value.voiceKey
+        val wav = if (key.startsWith("clone:")) {
+            val id = key.removePrefix("clone:").toLongOrNull()
+            val sample = id?.let { db.voiceDao().byId(it)?.samplePath }?.let(::File)?.takeIf { it.exists() }
+            if (sample != null) tts.cloneVoice(apiKey, text.take(600), sample).getOrNull()
+            else tts.synthesize(apiKey, text.take(600)).getOrNull()
+        } else {
+            val name = key.removePrefix("builtin:")
+            val lang = if (name.contains("HI-IN")) "hi-IN" else "en-US"
+            tts.synthesize(apiKey, text.take(600), voiceName = name, languageCode = lang).getOrNull()
+        }
 
         if (wav == null) {
             // Fall back to the phone's own TTS so the conversation still flows.

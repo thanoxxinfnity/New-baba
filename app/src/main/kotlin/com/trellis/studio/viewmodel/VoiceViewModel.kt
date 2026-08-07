@@ -34,21 +34,35 @@ data class BuiltInVoice(
     val label: String get() = "$speaker · $language"
 }
 
-val MAGPIE_SPEAKERS = listOf("Aria", "Mia", "Sofia", "Isabela", "Louise", "Jason", "Leo", "Ray", "Diego", "Pascal")
-
-val MAGPIE_LANGUAGES = listOf(
-    "EN-US" to "en-US",
-    "HI-IN" to "hi-IN",
-    "ES-US" to "es-US",
-    "FR-FR" to "fr-FR",
-    "DE-DE" to "de-DE",
+/**
+ * Real speaker → language map, read from GetRivaSynthesisConfig. The old code
+ * paired every speaker with every language, which minted voices the service does
+ * not have (Hindi Aria, Hindi Mia…) — selecting one failed with "subvoice not
+ * found", which is why the Indian/Hindi voices "didn't work". Only the pairings
+ * below actually exist.
+ */
+private val MAGPIE_BY_LANG: List<Pair<Pair<String, String>, List<String>>> = listOf(
+    ("EN-US" to "en-US") to listOf("Aria", "Jason", "Leo", "Mia", "Ray", "Sofia"),
+    ("HI-IN" to "hi-IN") to listOf("Sofia", "Leo", "Pascal", "Siwei"),
+    ("DE-DE" to "de-DE") to listOf("Diego", "Jason", "Leo", "Mia", "Pascal", "Ray"),
+    ("ES-US" to "es-US") to listOf("Diego", "Isabela"),
+    ("FR-FR" to "fr-FR") to listOf("Louise", "Pascal"),
+    ("IT-IT" to "it-IT") to listOf("Isabela", "Pascal"),
+    ("PT-BR" to "pt-BR") to listOf("Diego", "Isabela", "Louise"),
+    ("JA-JP" to "ja-JP") to listOf("HouZhen", "Isabela", "Louise", "Ray"),
+    ("KO-KR" to "ko-KR") to listOf("Aria", "Diego", "HouZhen", "Louise", "Pascal", "Ray"),
+    ("ZH-CN" to "zh-CN") to listOf("HouZhen", "Siwei"),
 )
+
+/** (display, code) for each language that actually has voices. */
+val MAGPIE_LANGUAGES: List<Pair<String, String>> = MAGPIE_BY_LANG.map { it.first }
 
 /** Emotions the service reports for these voices. */
 val MAGPIE_EMOTIONS = listOf("", "Neutral", "Calm", "Happy", "Sad", "Angry", "Fearful", "Disgusted")
 
-val MAGPIE_VOICES: List<BuiltInVoice> = MAGPIE_LANGUAGES.flatMap { (lang, code) ->
-    MAGPIE_SPEAKERS.map { BuiltInVoice(it, lang, code) }
+val MAGPIE_VOICES: List<BuiltInVoice> = MAGPIE_BY_LANG.flatMap { (langPair, speakers) ->
+    val (lang, code) = langPair
+    speakers.map { BuiltInVoice(it, lang, code) }
 }
 
 data class VoiceUiState(
