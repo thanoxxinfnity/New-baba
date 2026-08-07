@@ -56,8 +56,11 @@ class TrellisClient(private val context: Context) {
         const val ASSETS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
         const val STATUS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
         // Failures are a capacity coin-flip; a generous attempt count costs
-        // little now that each attempt aborts at 45s instead of 90s.
-        const val MAX_ATTEMPTS = 8
+        // little now that each attempt aborts at 45s instead of 90s. Measured
+        // live the service 504s on roughly two of every three calls when busy, so
+        // more rounds — each after a short pause that lets it recover — is what
+        // turns "3D generation error" into an eventual success.
+        const val MAX_ATTEMPTS = 12
         /** Concurrent requests per round. Two is the sweet spot — more of them
          *  made the service reject far more often in testing. */
         const val LANES = 2

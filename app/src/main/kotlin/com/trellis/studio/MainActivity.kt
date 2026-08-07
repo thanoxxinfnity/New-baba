@@ -58,6 +58,7 @@ sealed class NavRoute(
     object Agent : NavRoute("agent", "Agent", Icons.Outlined.SmartToy, Icons.Filled.SmartToy)
     object Game : NavRoute("game", "Game", Icons.Outlined.SportsEsports, Icons.Filled.SportsEsports)
     object Video : NavRoute("video", "Video", Icons.Outlined.Movie, Icons.Filled.Movie)
+    object LiveVoice : NavRoute("livevoice", "Live Voice", Icons.Outlined.RecordVoiceOver, Icons.Filled.RecordVoiceOver)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
@@ -78,6 +79,7 @@ val drawerEntries = listOf(
     DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
     DrawerEntry("video", "Video Studio", Icons.Filled.Movie, "Text → a real video, scene by scene", "Workspace"),
     DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "NVIDIA cloud TTS and voice cloning", "Workspace"),
+    DrawerEntry("livevoice", "Live Voice", Icons.Filled.RecordVoiceOver, "Talk to the AI out loud, in your voice", "Workspace"),
 
     DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
     DrawerEntry("artifacts", "Builds", Icons.Filled.Android, "APKs, files and build logs", "Developer"),
@@ -252,6 +254,7 @@ fun MainContent() {
                         )
                     }
                     composable(NavRoute.Video.route) { VideoScreen(onMenu = openDrawer) }
+                    composable(NavRoute.LiveVoice.route) { LiveVoiceScreen(onMenu = openDrawer) }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
 
                     // The image viewer existed but had no route, so tapping a

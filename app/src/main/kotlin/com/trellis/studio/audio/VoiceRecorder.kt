@@ -124,7 +124,10 @@ class VoiceRecorder(private val context: Context) {
         const val BITS = 16
         const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         const val FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        // The clone service only accepts a 3-10s prompt, so never record past 9s.
-        const val MAX_BYTES = SAMPLE_RATE * 2 * 9
+        // Let the user speak naturally for up to 30s instead of cutting them off at
+        // 9 — that hard stop mid-sentence was read as the recording "breaking". The
+        // cloner only wants 3-10s, but it trims to a clean middle window itself, so
+        // a longer take just gives it a better slice to choose from.
+        const val MAX_BYTES = SAMPLE_RATE * 2 * 30
     }
 }
