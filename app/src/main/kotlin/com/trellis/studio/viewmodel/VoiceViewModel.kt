@@ -235,7 +235,10 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                 val voice = s.selectedVoice
 
                 val result = if (voice?.isCloned == true && voice.samplePath != null) {
-                    tts.cloneVoice(apiKey, text, File(voice.samplePath), languageCode = s.languageCode)
+                    // The zero-shot cloner only serves en-US. Passing the built-in
+                    // voice's language (e.g. a Hindi hi-IN selection) made it reject
+                    // the call mid-generation — so cloning always uses its own locale.
+                    tts.cloneVoice(apiKey, text, File(voice.samplePath))
                 } else {
                     val base = voice?.voiceName?.ifBlank { null } ?: s.selectedBuiltIn
                     val withEmotion = if (s.emotion.isNotBlank()) "$base.${s.emotion}" else base

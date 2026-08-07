@@ -122,7 +122,10 @@ class NvidiaTtsClient {
         voiceSample: File,
         languageCode: String = "en-US",
         sampleRateHz: Int = 44100,
-        quality: Int = 20,
+        // Higher quality makes the model track the sample more closely, which keeps
+        // more of the speaker's own accent and prosody instead of flattening it to
+        // a generic English voice. It costs a little latency, worth it for cloning.
+        quality: Int = 35,
         transcript: String = "",
     ): Result<ByteArray> {
         if (!voiceSample.exists() || voiceSample.length() < 1024) {
@@ -163,7 +166,10 @@ class NvidiaTtsClient {
 
             val request = SynthesizeSpeechRequest.newBuilder()
                 .setText(text)
-                .setLanguageCode(languageCode)
+                // The zero-shot model is only served for en-US on this account;
+                // any other locale is rejected ("Voice for language … not found"),
+                // so it is fixed here no matter what the caller passes.
+                .setLanguageCode("en-US")
                 .setEncoding(AudioEncoding.LINEAR_PCM)
                 .setSampleRateHz(sampleRateHz)
                 .setZeroShotData(zeroShot)
