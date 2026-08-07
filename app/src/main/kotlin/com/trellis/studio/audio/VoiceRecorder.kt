@@ -25,6 +25,8 @@ class VoiceRecorder(private val context: Context) {
     @Volatile private var recording = false
     private var worker: Thread? = null
     private val buffer = ByteArrayOutputStream()
+    /** The rate actually used, chosen from what the device supports. */
+    private var activeRate = SAMPLE_RATE
 
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -37,20 +39,26 @@ class VoiceRecorder(private val context: Context) {
             return Result.failure(Exception("Microphone permission is needed to record a voice sample."))
         }
 
-        val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, FORMAT)
-        if (minBuffer <= 0) {
-            return Result.failure(Exception("This device can't record at ${SAMPLE_RATE}Hz."))
+        // Try the widely-supported rates in turn: a device that can't open one
+        // often opens another, so this records where a single fixed rate failed.
+        var recorder: AudioRecord? = null
+        var chosen = SAMPLE_RATE
+        for (rate in RATES) {
+            val minBuffer = AudioRecord.getMinBufferSize(rate, CHANNEL, FORMAT)
+            if (minBuffer <= 0) continue
+            val candidate = runCatching {
+                AudioRecord(MediaRecorder.AudioSource.MIC, rate, CHANNEL, FORMAT, minBuffer * 2)
+            }.getOrNull()
+            if (candidate?.state == AudioRecord.STATE_INITIALIZED) {
+                recorder = candidate; chosen = rate; break
+            }
+            runCatching { candidate?.release() }
         }
-        val bufferSize = minBuffer * 2
-
-        val recorder = runCatching {
-            AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE, CHANNEL, FORMAT, bufferSize)
-        }.getOrElse { return Result.failure(Exception("Could not open the microphone: ${it.message}")) }
-
-        if (recorder.state != AudioRecord.STATE_INITIALIZED) {
-            recorder.release()
+        if (recorder == null) {
             return Result.failure(Exception("Microphone is unavailable — another app may be using it."))
         }
+        activeRate = chosen
+        val bufferSize = AudioRecord.getMinBufferSize(chosen, CHANNEL, FORMAT) * 2
 
         buffer.reset()
         record = recorder
@@ -82,7 +90,7 @@ class VoiceRecorder(private val context: Context) {
         record = null
 
         val pcm = synchronized(buffer) { buffer.toByteArray() }
-        if (pcm.size < SAMPLE_RATE) {          // under ~0.5s of audio
+        if (pcm.size < activeRate) {           // under ~0.5s of audio
             return Result.failure(Exception("Recording too short — hold for at least 3 seconds."))
         }
 
@@ -100,10 +108,10 @@ class VoiceRecorder(private val context: Context) {
         record = null
     }
 
-    /** Wraps raw PCM in a RIFF header. */
+    /** Wraps raw PCM in a RIFF header at the rate actually recorded. */
     private fun wav(pcm: ByteArray): ByteArray {
         val out = ByteArrayOutputStream(pcm.size + 44)
-        val byteRate = SAMPLE_RATE * CHANNELS * BITS / 8
+        val byteRate = activeRate * CHANNELS * BITS / 8
         fun i32(v: Int) = byteArrayOf(
             (v and 0xff).toByte(), ((v shr 8) and 0xff).toByte(),
             ((v shr 16) and 0xff).toByte(), ((v shr 24) and 0xff).toByte(),
@@ -112,14 +120,19 @@ class VoiceRecorder(private val context: Context) {
 
         out.write("RIFF".toByteArray()); out.write(i32(36 + pcm.size)); out.write("WAVE".toByteArray())
         out.write("fmt ".toByteArray()); out.write(i32(16)); out.write(i16(1))
-        out.write(i16(CHANNELS)); out.write(i32(SAMPLE_RATE)); out.write(i32(byteRate))
+        out.write(i16(CHANNELS)); out.write(i32(activeRate)); out.write(i32(byteRate))
         out.write(i16(CHANNELS * BITS / 8)); out.write(i16(BITS))
         out.write("data".toByteArray()); out.write(i32(pcm.size)); out.write(pcm)
         return out.toByteArray()
     }
 
     private companion object {
-        const val SAMPLE_RATE = 22050          // Riva accepts this for voice prompts
+        // 44.1kHz is the one rate essentially every Android mic supports, so it
+        // records reliably where 22.05kHz silently failed on some devices; Riva
+        // accepts it as a voice prompt too.
+        const val SAMPLE_RATE = 44100
+        /** Rates to try, most compatible first. */
+        val RATES = intArrayOf(44100, 48000, 16000, 22050, 8000)
         const val CHANNELS = 1
         const val BITS = 16
         const val CHANNEL = AudioFormat.CHANNEL_IN_MONO

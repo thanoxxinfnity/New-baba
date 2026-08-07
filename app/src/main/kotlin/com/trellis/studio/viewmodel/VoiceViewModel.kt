@@ -12,8 +12,10 @@ import com.trellis.studio.data.entity.TtsHistoryEntity
 import com.trellis.studio.data.entity.VoiceEntity
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.NvidiaTtsClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -172,11 +174,25 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(isCloning = true, status = "Cloning voice…", error = null) }
             try {
                 val apiKey = prefs.nvidiaKey.first()
+
+                // Copy the recording into a permanent, voice-owned file and keep
+                // THAT as the sample. The transient recording path was surviving
+                // long enough to make the preview but could go missing before the
+                // voice was used again — which surfaced later as "sample is missing
+                // or too short" at generation. A verified owned copy can't.
+                val stable = withContext(Dispatchers.IO) {
+                    val src = File(sample)
+                    if (!src.exists() || src.length() < 1024)
+                        throw Exception("The recording didn't save. Record again for a few seconds.")
+                    val dir = File(getApplication<Application>().filesDir, "voices").apply { mkdirs() }
+                    File(dir, "clone_${System.currentTimeMillis()}.wav").also { src.copyTo(it, overwrite = true) }
+                }
+
                 // Generate a preview so the saved voice can be auditioned instantly.
                 val preview = tts.cloneVoice(
                     apiKey = apiKey,
                     text = "Hi, this is $name. This is how I sound.",
-                    voiceSample = File(sample),
+                    voiceSample = stable,
                 )
                 // Save the voice either way: the sample is the valuable part, and
                 // the preview can be regenerated once the service answers again.
@@ -186,7 +202,7 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                 val id = db.voiceDao().insert(
                     VoiceEntity(
                         name = name.ifBlank { "My voice" },
-                        samplePath = sample,
+                        samplePath = stable.absolutePath,
                         previewPath = previewPath,
                         isCloned = true,
                     )
@@ -235,10 +251,22 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                 val voice = s.selectedVoice
 
                 val result = if (voice?.isCloned == true && voice.samplePath != null) {
+                    // If the saved recording is gone, say exactly that and which
+                    // voice, instead of the generic "sample too short" that left
+                    // the user re-trying a voice whose file no longer exists.
+                    val sampleFile = File(voice.samplePath)
+                    if (!sampleFile.exists() || sampleFile.length() < 1024) {
+                        _state.update {
+                            it.copy(isGenerating = false, status = null,
+                                error = "The recording for \"${voice.name}\" is missing. " +
+                                    "Re-record this voice once in the clone panel.")
+                        }
+                        return@launch
+                    }
                     // The zero-shot cloner only serves en-US. Passing the built-in
                     // voice's language (e.g. a Hindi hi-IN selection) made it reject
                     // the call mid-generation — so cloning always uses its own locale.
-                    tts.cloneVoice(apiKey, text, File(voice.samplePath))
+                    tts.cloneVoice(apiKey, text, sampleFile)
                 } else {
                     val base = voice?.voiceName?.ifBlank { null } ?: s.selectedBuiltIn
                     val withEmotion = if (s.emotion.isNotBlank()) "$base.${s.emotion}" else base
