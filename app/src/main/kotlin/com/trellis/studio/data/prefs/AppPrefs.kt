@@ -45,6 +45,7 @@ class AppPrefs(private val context: Context) {
 
         val KEY_YT_API           = stringPreferencesKey("youtube_api_key")
         val KEY_VIDEO_SERVER     = stringPreferencesKey("video_server_url")
+        val KEY_VOICE_SERVER     = stringPreferencesKey("voice_clone_server_url")
         val KEY_GAME_MODEL       = stringPreferencesKey("game_model")
         // Writes the whole game as one GDScript file. Measured against the live
         // API on a real "collect the coins" build, GLM produced clean, valid
@@ -87,6 +88,7 @@ class AppPrefs(private val context: Context) {
     val gameModel: Flow<String> = ds.data.catchIO().map { it[KEY_GAME_MODEL] ?: DEFAULT_GAME_MODEL }
     val youtubeKey: Flow<String> = ds.data.catchIO().map { it[KEY_YT_API] ?: "" }
     val videoServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_VIDEO_SERVER] ?: "" }
+    val voiceServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_VOICE_SERVER] ?: "" }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
@@ -109,6 +111,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setGameModel(v: String) = ds.edit { it[KEY_GAME_MODEL] = v }
     suspend fun setYoutubeKey(v: String) = ds.edit { it[KEY_YT_API] = v.trim() }
     suspend fun setVideoServerUrl(v: String) = ds.edit { it[KEY_VIDEO_SERVER] = v.trim().trimEnd('/') }
+    suspend fun setVoiceServerUrl(v: String) = ds.edit { it[KEY_VOICE_SERVER] = v.trim().trimEnd('/') }
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
 }
 

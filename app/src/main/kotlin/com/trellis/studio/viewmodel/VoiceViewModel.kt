@@ -82,6 +82,10 @@ data class VoiceUiState(
     val playingPath: String? = null,
     val status: String? = null,
     val error: String? = null,
+    /** Accent for a cloned voice via the XTTS server: "hi" (Indian) or "en". */
+    val cloneAccent: String = "hi",
+    /** True once a voice-clone server URL is set — unlocks accented cloning. */
+    val voiceServerReady: Boolean = false,
 ) {
     val selectedVoice: VoiceEntity?
         get() = voices.find { it.id == selectedVoiceId }
@@ -101,7 +105,14 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val prefs = AppPrefs(app)
     private val tts = NvidiaTtsClient()
+    private val remoteVoice = com.trellis.studio.network.RemoteVoiceClient()
     private val recorder = VoiceRecorder(app)
+
+    fun setCloneAccent(code: String) = _state.update { it.copy(cloneAccent = code) }
+
+    private fun accentLabel(code: String) = when (code) {
+        "hi" -> "Hindi"; "en" -> "English"; else -> code
+    }
 
     private var player: MediaPlayer? = null
 
@@ -111,6 +122,11 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             db.voiceDao().getAll().collect { list -> _state.update { it.copy(voices = list) } }
+        }
+        viewModelScope.launch {
+            prefs.voiceServerUrl.collect { url ->
+                _state.update { it.copy(voiceServerReady = url.isNotBlank()) }
+            }
         }
         viewModelScope.launch {
             db.ttsDao().getAll().collect { list -> _state.update { it.copy(history = list) } }
@@ -277,10 +293,17 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         return@launch
                     }
-                    // The zero-shot cloner only serves en-US. Passing the built-in
-                    // voice's language (e.g. a Hindi hi-IN selection) made it reject
-                    // the call mid-generation — so cloning always uses its own locale.
-                    tts.cloneVoice(apiKey, text, sampleFile)
+                    // With a voice-clone server set, clone through XTTS, which can
+                    // speak the cloned voice in Hindi/Indian accent — the thing
+                    // NVIDIA's English-only cloner can't do. Without a server, fall
+                    // back to NVIDIA (en-US timbre clone).
+                    val voiceServer = prefs.voiceServerUrl.first()
+                    if (voiceServer.isNotBlank()) {
+                        _state.update { it.copy(status = "Cloning in ${accentLabel(s.cloneAccent)}…") }
+                        remoteVoice.clone(voiceServer, sampleFile, text, s.cloneAccent)
+                    } else {
+                        tts.cloneVoice(apiKey, text, sampleFile)
+                    }
                 } else {
                     val base = voice?.voiceName?.ifBlank { null } ?: s.selectedBuiltIn
                     val withEmotion = if (s.emotion.isNotBlank()) "$base.${s.emotion}" else base

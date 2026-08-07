@@ -32,6 +32,7 @@ fun SettingsScreen(
     val pollKey by vm.pollKey.collectAsStateWithLifecycle()
     val youtubeKey by vm.youtubeKey.collectAsStateWithLifecycle()
     val videoServerUrl by vm.videoServerUrl.collectAsStateWithLifecycle()
+    val voiceServerUrl by vm.voiceServerUrl.collectAsStateWithLifecycle()
     val systemPrompt by vm.systemPrompt.collectAsStateWithLifecycle()
     val maxTokens by vm.maxTokens.collectAsStateWithLifecycle()
     val temperature by vm.temperature.collectAsStateWithLifecycle()
@@ -87,6 +88,15 @@ fun SettingsScreen(
                         "notebook (free GPU), paste the public URL it prints here, then turn " +
                         "on \"Real motion\" in Video Studio.",
                     onSave = vm::setVideoServerUrl,
+                )
+                ApiKeyField(
+                    label = "Voice clone server URL",
+                    value = voiceServerUrl,
+                    hint = "https://xxxx.trycloudflare.com",
+                    description = "Optional — clone a voice in an Indian/Hindi accent. Run the " +
+                        "VOID voice Kaggle notebook (free GPU, XTTS), paste its URL here, then " +
+                        "pick your cloned voice and Hindi in the Voice tab.",
+                    onSave = vm::setVoiceServerUrl,
                 )
             }
 

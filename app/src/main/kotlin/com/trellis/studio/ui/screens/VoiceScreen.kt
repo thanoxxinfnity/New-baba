@@ -251,6 +251,27 @@ fun VoiceScreen(
                         )
                     }
                 }
+
+                // Accent for a cloned voice, via the XTTS server — this is what lets
+                // a cloned voice speak with an Indian/Hindi accent.
+                if (state.selectedVoice?.isCloned == true && state.voiceServerReady) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Accent:", style = MaterialTheme.typography.labelSmall, color = TextDisabled)
+                        listOf("hi" to "🇮🇳 Hindi", "en" to "English").forEach { (code, label) ->
+                            FilterChip(
+                                selected = state.cloneAccent == code,
+                                onClick = { vm.setCloneAccent(code) },
+                                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Purple40, selectedLabelColor = TextPrimary),
+                            )
+                        }
+                    }
+                }
                 Row(
                     Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
