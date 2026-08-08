@@ -55,10 +55,11 @@ class AppPrefs(private val context: Context) {
         val KEY_HF_VOICE_SPACE   = stringPreferencesKey("hf_voice_space_url")
         const val VOICE_PROVIDER_NVIDIA = "nvidia"
         const val VOICE_PROVIDER_HF     = "huggingface"
-        // A public XTTS voice-clone Space, verified live to accept a file upload and
-        // return the cloned voice in the recording's own accent. Users can point this
-        // at their own free duplicate for a private, always-on-demand instance.
-        val DEFAULT_HF_VOICE_SPACE = "https://tonyassi-voice-clone.hf.space"
+        // A public XTTS voice-clone Space, verified live to clone in Hindi/Indian
+        // accent from an uploaded sample. It runs on CPU (no ZeroGPU daily quota),
+        // so it stays reliable where a shared GPU Space fails once quota runs out —
+        // just slower (~30–60s a line). Users can duplicate it for a private one.
+        val DEFAULT_HF_VOICE_SPACE = "https://minsus-voice-cloning-xtts-v2.hf.space"
         val KEY_GAME_MODEL       = stringPreferencesKey("game_model")
         // Writes the whole game as one GDScript file. Measured against the live
         // API on a real "collect the coins" build, GLM produced clean, valid

@@ -304,12 +304,13 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                     val voiceServer = prefs.voiceServerUrl.first()
                     when {
                         provider == AppPrefs.VOICE_PROVIDER_HF -> {
-                            _state.update { it.copy(status = "Cloning in your accent (Hugging Face)…") }
+                            _state.update { it.copy(status = "Cloning in ${accentLabel(s.cloneAccent)} (Hugging Face)… this can take ~30–60s") }
                             hfVoice.clone(
                                 spaceUrl = prefs.hfVoiceSpace.first(),
                                 hfToken = prefs.hfToken.first(),
                                 sample = sampleFile,
                                 text = text,
+                                accent = s.cloneAccent,
                             )
                         }
                         voiceServer.isNotBlank() -> {
