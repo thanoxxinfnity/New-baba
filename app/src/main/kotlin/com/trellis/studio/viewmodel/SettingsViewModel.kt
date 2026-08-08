@@ -16,6 +16,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val youtubeKey  = prefs.youtubeKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val videoServerUrl = prefs.videoServerUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val voiceServerUrl = prefs.voiceServerUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val voiceProvider = prefs.voiceProvider.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.VOICE_PROVIDER_NVIDIA)
+    val hfToken = prefs.hfToken.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val hfVoiceSpace = prefs.hfVoiceSpace.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_HF_VOICE_SPACE)
     val selectedLlm = prefs.selectedLlm.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_LLM)
     val selectedImg = prefs.selectedImg.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_IMG)
     val selected3d  = prefs.selected3d.stateIn(viewModelScope, SharingStarted.Eagerly, AppPrefs.DEFAULT_3D)
@@ -32,6 +35,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setYoutubeKey(v: String)   = viewModelScope.launch { prefs.setYoutubeKey(v.trim()) }
     fun setVideoServerUrl(v: String) = viewModelScope.launch { prefs.setVideoServerUrl(v.trim()) }
     fun setVoiceServerUrl(v: String) = viewModelScope.launch { prefs.setVoiceServerUrl(v.trim()) }
+    fun setVoiceProvider(v: String) = viewModelScope.launch { prefs.setVoiceProvider(v) }
+    fun setHfToken(v: String) = viewModelScope.launch { prefs.setHfToken(v.trim()) }
+    fun setHfVoiceSpace(v: String) = viewModelScope.launch { prefs.setHfVoiceSpace(v.trim()) }
     fun setSelectedLlm(v: String)  = viewModelScope.launch { prefs.setSelectedLlm(v) }
     fun setSelectedImg(v: String)  = viewModelScope.launch { prefs.setSelectedImg(v) }
     fun setSelected3d(v: String)   = viewModelScope.launch { prefs.setSelected3d(v) }

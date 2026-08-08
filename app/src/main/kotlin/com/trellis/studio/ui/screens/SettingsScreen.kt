@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.viewmodel.SettingsViewModel
@@ -33,6 +34,9 @@ fun SettingsScreen(
     val youtubeKey by vm.youtubeKey.collectAsStateWithLifecycle()
     val videoServerUrl by vm.videoServerUrl.collectAsStateWithLifecycle()
     val voiceServerUrl by vm.voiceServerUrl.collectAsStateWithLifecycle()
+    val voiceProvider by vm.voiceProvider.collectAsStateWithLifecycle()
+    val hfToken by vm.hfToken.collectAsStateWithLifecycle()
+    val hfVoiceSpace by vm.hfVoiceSpace.collectAsStateWithLifecycle()
     val systemPrompt by vm.systemPrompt.collectAsStateWithLifecycle()
     val maxTokens by vm.maxTokens.collectAsStateWithLifecycle()
     val temperature by vm.temperature.collectAsStateWithLifecycle()
@@ -98,6 +102,69 @@ fun SettingsScreen(
                         "pick your cloned voice and Hindi in the Voice tab.",
                     onSave = vm::setVoiceServerUrl,
                 )
+            }
+
+            // ---- Voice cloning engine: NVIDIA (24/7, English) vs Hugging Face (your accent) ----
+            SettingsSection(title = "Voice Cloning", icon = Icons.Default.RecordVoiceOver) {
+                Text(
+                    "Choose how your recorded voice is cloned:",
+                    style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = voiceProvider == AppPrefs.VOICE_PROVIDER_NVIDIA,
+                        onClick = { vm.setVoiceProvider(AppPrefs.VOICE_PROVIDER_NVIDIA) },
+                        label = { Text("NVIDIA") },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Purple60.copy(alpha = 0.30f),
+                            selectedLabelColor = TextPrimary,
+                        ),
+                    )
+                    FilterChip(
+                        selected = voiceProvider == AppPrefs.VOICE_PROVIDER_HF,
+                        onClick = { vm.setVoiceProvider(AppPrefs.VOICE_PROVIDER_HF) },
+                        label = { Text("Hugging Face") },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Purple60.copy(alpha = 0.30f),
+                            selectedLabelColor = TextPrimary,
+                        ),
+                    )
+                }
+                Text(
+                    if (voiceProvider == AppPrefs.VOICE_PROVIDER_HF)
+                        "Hugging Face (XTTS): keeps YOUR recording's accent — so record " +
+                            "yourself speaking Indian English / Hindi and the clone stays " +
+                            "Indian. Free and on-demand; the first request can take ~1 min " +
+                            "while the Space wakes up, then it's a few seconds."
+                    else
+                        "NVIDIA (Magpie): always-on and fast, but the cloned voice speaks " +
+                            "with an English (US) accent only.",
+                    style = MaterialTheme.typography.bodySmall, color = TextDisabled,
+                )
+                if (voiceProvider == AppPrefs.VOICE_PROVIDER_HF) {
+                    ApiKeyField(
+                        label = "Hugging Face token",
+                        value = hfToken,
+                        hint = "hf_…",
+                        description = "Free at huggingface.co/settings/tokens (read scope). " +
+                            "Used to call the voice Space.",
+                        onSave = vm::setHfToken,
+                    )
+                    ApiKeyField(
+                        label = "Voice Space URL",
+                        value = hfVoiceSpace,
+                        hint = AppPrefs.DEFAULT_HF_VOICE_SPACE,
+                        description = "An XTTS clone Space (text + reference audio). The default " +
+                            "works; for a private, always-ready one, duplicate that Space to " +
+                            "your own account and paste its URL here.",
+                        onSave = vm::setHfVoiceSpace,
+                    )
+                }
             }
 
             // ---- Build server: the only way to get a real APK ----

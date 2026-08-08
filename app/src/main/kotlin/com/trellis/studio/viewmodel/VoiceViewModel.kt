@@ -106,6 +106,7 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = AppPrefs(app)
     private val tts = NvidiaTtsClient()
     private val remoteVoice = com.trellis.studio.network.RemoteVoiceClient()
+    private val hfVoice = com.trellis.studio.network.HfVoiceClient()
     private val recorder = VoiceRecorder(app)
 
     fun setCloneAccent(code: String) = _state.update { it.copy(cloneAccent = code) }
@@ -293,16 +294,29 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         return@launch
                     }
-                    // With a voice-clone server set, clone through XTTS, which can
-                    // speak the cloned voice in Hindi/Indian accent — the thing
-                    // NVIDIA's English-only cloner can't do. Without a server, fall
-                    // back to NVIDIA (en-US timbre clone).
+                    // The clone engine is the user's choice:
+                    //  • Hugging Face XTTS Space — keeps YOUR recording's accent
+                    //    (Indian), free + on-demand. This is what makes an Indian
+                    //    accent possible; NVIDIA's cloner is English-only.
+                    //  • a self-hosted XTTS /clone server (advanced), if set.
+                    //  • otherwise NVIDIA Magpie (en-US timbre clone), 24/7.
+                    val provider = prefs.voiceProvider.first()
                     val voiceServer = prefs.voiceServerUrl.first()
-                    if (voiceServer.isNotBlank()) {
-                        _state.update { it.copy(status = "Cloning in ${accentLabel(s.cloneAccent)}…") }
-                        remoteVoice.clone(voiceServer, sampleFile, text, s.cloneAccent)
-                    } else {
-                        tts.cloneVoice(apiKey, text, sampleFile)
+                    when {
+                        provider == AppPrefs.VOICE_PROVIDER_HF -> {
+                            _state.update { it.copy(status = "Cloning in your accent (Hugging Face)…") }
+                            hfVoice.clone(
+                                spaceUrl = prefs.hfVoiceSpace.first(),
+                                hfToken = prefs.hfToken.first(),
+                                sample = sampleFile,
+                                text = text,
+                            )
+                        }
+                        voiceServer.isNotBlank() -> {
+                            _state.update { it.copy(status = "Cloning in ${accentLabel(s.cloneAccent)}…") }
+                            remoteVoice.clone(voiceServer, sampleFile, text, s.cloneAccent)
+                        }
+                        else -> tts.cloneVoice(apiKey, text, sampleFile)
                     }
                 } else {
                     val base = voice?.voiceName?.ifBlank { null } ?: s.selectedBuiltIn

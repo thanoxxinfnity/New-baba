@@ -46,6 +46,19 @@ class AppPrefs(private val context: Context) {
         val KEY_YT_API           = stringPreferencesKey("youtube_api_key")
         val KEY_VIDEO_SERVER     = stringPreferencesKey("video_server_url")
         val KEY_VOICE_SERVER     = stringPreferencesKey("voice_clone_server_url")
+
+        // Which engine clones a voice. "nvidia" = Magpie zero-shot: 24/7 free but
+        // English accent only. "huggingface" = an XTTS Space on Hugging Face: keeps
+        // the accent of your own recording (so, Indian), free and on-demand.
+        val KEY_VOICE_PROVIDER   = stringPreferencesKey("voice_clone_provider")
+        val KEY_HF_TOKEN         = stringPreferencesKey("hf_token")
+        val KEY_HF_VOICE_SPACE   = stringPreferencesKey("hf_voice_space_url")
+        const val VOICE_PROVIDER_NVIDIA = "nvidia"
+        const val VOICE_PROVIDER_HF     = "huggingface"
+        // A public XTTS voice-clone Space, verified live to accept a file upload and
+        // return the cloned voice in the recording's own accent. Users can point this
+        // at their own free duplicate for a private, always-on-demand instance.
+        val DEFAULT_HF_VOICE_SPACE = "https://tonyassi-voice-clone.hf.space"
         val KEY_GAME_MODEL       = stringPreferencesKey("game_model")
         // Writes the whole game as one GDScript file. Measured against the live
         // API on a real "collect the coins" build, GLM produced clean, valid
@@ -89,6 +102,9 @@ class AppPrefs(private val context: Context) {
     val youtubeKey: Flow<String> = ds.data.catchIO().map { it[KEY_YT_API] ?: "" }
     val videoServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_VIDEO_SERVER] ?: "" }
     val voiceServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_VOICE_SERVER] ?: "" }
+    val voiceProvider: Flow<String> = ds.data.catchIO().map { it[KEY_VOICE_PROVIDER] ?: VOICE_PROVIDER_NVIDIA }
+    val hfToken: Flow<String> = ds.data.catchIO().map { it[KEY_HF_TOKEN] ?: "" }
+    val hfVoiceSpace: Flow<String> = ds.data.catchIO().map { it[KEY_HF_VOICE_SPACE]?.ifBlank { DEFAULT_HF_VOICE_SPACE } ?: DEFAULT_HF_VOICE_SPACE }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
@@ -112,6 +128,9 @@ class AppPrefs(private val context: Context) {
     suspend fun setYoutubeKey(v: String) = ds.edit { it[KEY_YT_API] = v.trim() }
     suspend fun setVideoServerUrl(v: String) = ds.edit { it[KEY_VIDEO_SERVER] = v.trim().trimEnd('/') }
     suspend fun setVoiceServerUrl(v: String) = ds.edit { it[KEY_VOICE_SERVER] = v.trim().trimEnd('/') }
+    suspend fun setVoiceProvider(v: String) = ds.edit { it[KEY_VOICE_PROVIDER] = v }
+    suspend fun setHfToken(v: String) = ds.edit { it[KEY_HF_TOKEN] = v.trim() }
+    suspend fun setHfVoiceSpace(v: String) = ds.edit { it[KEY_HF_VOICE_SPACE] = v.trim().trimEnd('/') }
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
 }
 

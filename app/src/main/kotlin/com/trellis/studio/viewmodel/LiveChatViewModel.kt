@@ -52,6 +52,7 @@ class LiveChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val nim = NimClient()
     private val tts = NvidiaTtsClient()
+    private val hfVoice = com.trellis.studio.network.HfVoiceClient()
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -149,8 +150,19 @@ class LiveChatViewModel(app: Application) : AndroidViewModel(app) {
         val wav = if (key.startsWith("clone:")) {
             val id = key.removePrefix("clone:").toLongOrNull()
             val sample = id?.let { db.voiceDao().byId(it)?.samplePath }?.let(::File)?.takeIf { it.exists() }
-            if (sample != null) tts.cloneVoice(apiKey, text.take(600), sample).getOrNull()
-            else tts.synthesize(apiKey, text.take(600)).getOrNull()
+            when {
+                sample == null -> tts.synthesize(apiKey, text.take(600)).getOrNull()
+                // Honor the clone engine choice: Hugging Face XTTS keeps your own
+                // accent (Indian); NVIDIA is faster but English-only.
+                prefs.voiceProvider.first() == AppPrefs.VOICE_PROVIDER_HF ->
+                    hfVoice.clone(
+                        spaceUrl = prefs.hfVoiceSpace.first(),
+                        hfToken = prefs.hfToken.first(),
+                        sample = sample,
+                        text = text.take(600),
+                    ).getOrNull() ?: tts.cloneVoice(apiKey, text.take(600), sample).getOrNull()
+                else -> tts.cloneVoice(apiKey, text.take(600), sample).getOrNull()
+            }
         } else {
             val name = key.removePrefix("builtin:")
             val lang = if (name.contains("HI-IN")) "hi-IN" else "en-US"
