@@ -88,6 +88,13 @@ class TrellisClient(private val context: Context) {
          * is the only kind of "try again differently" the service supports.
          */
         seed: Long? = null,
+        /**
+         * Caps how hard to try. The default keeps the patient behaviour for the
+         * standalone generator, but the game builder passes a small number so a
+         * busy 3D service fails fast to a primitive instead of hanging the whole
+         * build for many minutes (each dud attempt burns up to 45s).
+         */
+        maxAttempts: Int = MAX_ATTEMPTS,
         onAttempt: suspend (attempt: Int, total: Int) -> Unit = { _, _ -> },
     ): Result<String> =
         withContext(Dispatchers.IO) {
@@ -116,7 +123,7 @@ class TrellisClient(private val context: Context) {
             // lanes per round therefore roughly halve the wait: measured live, one
             // lane returned a model in 19.9s while its twin timed out.
             var last: Throwable? = null
-            val rounds = (MAX_ATTEMPTS + 1) / LANES
+            val rounds = (maxAttempts.coerceAtLeast(LANES) + 1) / LANES
             repeat(rounds) { round ->
                 onAttempt(round + 1, rounds)
                 val winner = raceOnce(apiKey, body)

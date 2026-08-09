@@ -350,14 +350,16 @@ private fun HowItWorks() {
                 Text("How this works", color = TextPrimary, style = MaterialTheme.typography.labelLarge)
             }
             Text(
-                "VOID writes the game as Godot 4 GDScript and packs it, with your " +
-                    "models, into a project. You get a .zip — open its project.godot in " +
-                    "Godot 4.3+ on your phone, let it import, and press Play.",
+                "VOID designs the 3D models, generates each one, rigs it with bones, " +
+                    "and saves it to your Gallery — then writes the game as Godot 4 " +
+                    "GDScript and packs it all into a project. You get a .zip: open its " +
+                    "project.godot in Godot 4.3+, let it import, and press Play.",
                 color = TextSecondary, style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                "This is reliable because the AI only writes code — it never has to " +
-                    "poke Godot's buttons. Edit main.gd to change the game.",
+                "You always get a real, runnable zip — if the AI code step can't " +
+                    "complete, VOID drops in a ready-made playable game that still uses " +
+                    "your models. Edit main.gd to change anything.",
                 color = TextDisabled, style = MaterialTheme.typography.labelSmall,
             )
         }

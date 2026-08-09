@@ -126,20 +126,48 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             emptyList()
         }
 
-        // Generate each asset. 3D generation is a capacity coin-flip, so a model
-        // that won't come out is skipped rather than failing the whole build —
-        // the game code falls back to primitives for anything missing.
+        // Generate each asset. 3D generation is a capacity coin-flip, so cap the
+        // attempts (maxAttempts) — a model that won't come out quickly is skipped
+        // rather than hanging the build for many minutes; the game then falls back
+        // to primitives for anything missing. Each model that DOES come out is
+        // rigged (bones added) and saved to the VOID gallery so it is reusable.
         val inputs = ArrayList<GameForge.ModelInput>()
         specs.forEachIndexed { i, spec ->
             _status.value = "Generating model ${i + 1}/${specs.size}: ${spec.name}…"
-            trellis.generateFromText(apiKey, spec.prompt)
-                .onSuccess { path -> inputs.add(GameForge.ModelInput(File(path), spec.role)) }
+            trellis.generateFromText(apiKey, spec.prompt, maxAttempts = 4)
+                .onSuccess { path ->
+                    val usable = riggedOrRaw(File(path), spec.name)
+                    saveModelToGallery(usable, spec.name)
+                    inputs.add(GameForge.ModelInput(usable, spec.role))
+                }
         }
 
         if (inputs.isEmpty() && specs.isNotEmpty()) {
             _message.value = "The 3D service was busy, so the game uses simple shapes for now."
         }
         assembleGame(apiKey, model, gameName(idea), idea, inputs)
+    }
+
+    /**
+     * Adds bones to a generated model so it is animation-ready, returning the
+     * rigged file. Rigging fails for a solid shape with no limbs (a coin, a
+     * barrel) — that's fine, we just keep the original.
+     */
+    private suspend fun riggedOrRaw(glb: File, name: String): File {
+        _status.value = "Rigging $name…"
+        val dir = File(getApplication<Application>().filesDir, "models3d").apply { mkdirs() }
+        return com.trellis.studio.util.AutoRigger.addBones(glb, dir)
+            .map { it.file }
+            .getOrDefault(glb)
+    }
+
+    /** Registers a generated model in the VOID gallery (type "3d"), reusable later. */
+    private suspend fun saveModelToGallery(glb: File, name: String) {
+        runCatching {
+            db.generationDao().insert(
+                GenerationEntity(type = "3d", prompt = name, modelPath = glb.absolutePath)
+            )
+        }
     }
 
     /** Shared: write the GDScript, assemble the project, store it in history. */
@@ -156,18 +184,40 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         val modelLines = resInputs.map { (input, resName) -> "- $resName.glb : ${input.role}" }
 
         _status.value = "Writing & checking the game code… (up to ~2 min)"
-        director.write(apiKey, model, idea, modelLines)
-            .onSuccess { code ->
-                _status.value = "Assembling the Godot project…"
-                GameForge.assemble(name, code, inputs, FileExport.outputDir(getApplication()))
+        // If the AI can't produce usable code (model down, network drop), fall
+        // back to a hand-written, Godot-verified game so a real, runnable zip is
+        // ALWAYS produced. The user's models still get used — the fallback
+        // auto-discovers whatever is in res://models/.
+        val code = director.write(apiKey, model, idea, modelLines).getOrElse { err ->
+            _message.value = "Used a ready-made playable game (the AI code step " +
+                "didn't come through: ${err.message ?: "unknown"})."
+            GameForge.FALLBACK_GAME
+        }
+
+        _status.value = "Assembling the Godot project…"
+        GameForge.assemble(name, code, inputs, FileExport.outputDir(getApplication()))
+            .onSuccess { assembled ->
+                runCatching {
+                    db.generationDao().insert(
+                        GenerationEntity(
+                            type = "game",
+                            prompt = name,
+                            modelPath = assembled.zip.absolutePath,
+                        )
+                    )
+                }
+                _status.value = null
+                _built.value = assembled.zip
+                _message.value = "Game ready: $name"
+            }
+            .onFailure { err ->
+                // Even assembly failing shouldn't leave the user empty-handed —
+                // retry once with the guaranteed fallback code.
+                GameForge.assemble(name, GameForge.FALLBACK_GAME, inputs, FileExport.outputDir(getApplication()))
                     .onSuccess { assembled ->
                         runCatching {
                             db.generationDao().insert(
-                                GenerationEntity(
-                                    type = "game",
-                                    prompt = name,
-                                    modelPath = assembled.zip.absolutePath,
-                                )
+                                GenerationEntity(type = "game", prompt = name, modelPath = assembled.zip.absolutePath)
                             )
                         }
                         _status.value = null
@@ -176,12 +226,8 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     .onFailure {
                         _status.value = null
-                        _message.value = it.message ?: "Couldn't assemble the project."
+                        _message.value = err.message ?: "Couldn't assemble the project."
                     }
-            }
-            .onFailure {
-                _status.value = null
-                _message.value = it.message ?: "Couldn't write the game code."
             }
     }
 
