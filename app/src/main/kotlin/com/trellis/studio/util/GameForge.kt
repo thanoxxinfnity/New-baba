@@ -92,13 +92,22 @@ object GameForge {
         var c = code
         // get_window_size() / OS.get_window_size() do not exist in Godot 4.
         c = c.replace(Regex("""(?:OS\.)?get_window_size\(\)"""), "get_viewport().get_visible_rect().size")
-        // `:= event.<prop>` fails: InputEvent's members are untyped on the base
-        // class. Drop the inference so it compiles (runtime value is unchanged).
-        c = c.replace(Regex("""(\bvar\s+\w+)\s*:=\s*(event\b)"""), "$1 = $2")
-        c = c.replace(Regex("""(\bvar\s+\w+)\s*:=\s*(\w*event\w*\.)"""), "$1 = $2")
+        // Demote every inferred `var x :=` to a plain `var x =`. The models keep
+        // using `:=` on right-hand sides whose type Godot can't infer (an untyped
+        // `event as …` result, a subtraction of Variant properties, …), which is a
+        // hard "Cannot infer the type" parse error — verified live in Godot 4.3.
+        // `=` is byte-for-byte identical at runtime (it just makes the variable
+        // dynamically typed), so this removes a whole class of parse errors with
+        // no behaviour change. Only `var` declarations are touched — `const`,
+        // comparisons (`==`, `<=`) and typed `var x: T =` are left alone.
+        c = c.replace(Regex("""(\bvar\s+\w+)\s*:="""), "$1 =")
         // ProceduralSkyMaterial has no sun_latitude / sun_longitude in Godot 4.3
         // — the sun direction comes from the DirectionalLight3D. Drop those lines.
         c = c.replace(Regex("""(?m)^[ \t]*\w+\.sun_(?:latitude|longitude)\s*=.*\R?"""), "")
+        // Environment's mode property is `background_mode`, not `background`; the
+        // models often write `env.background = Environment.BG_SKY`, which Godot
+        // 4.3 rejects at runtime ("Invalid assignment of property 'background'").
+        c = c.replace(Regex("""\.background\s*=\s*(Environment\.BG_)"""), ".background_mode = $1")
         return c
     }
 

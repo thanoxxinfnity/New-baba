@@ -23,8 +23,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
+import com.trellis.studio.viewmodel.GameHistoryItem
 import com.trellis.studio.viewmodel.GameModel
 import com.trellis.studio.viewmodel.GameViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Make a real game from your 3D models: pick the models, say what the game is,
@@ -42,6 +46,7 @@ fun GameScreen(
 ) {
     val context = LocalContext.current
     val models by vm.models.collectAsStateWithLifecycle()
+    val games by vm.games.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val built by vm.built.collectAsStateWithLifecycle()
@@ -50,6 +55,8 @@ fun GameScreen(
 
     val selected = remember { mutableStateListOf<Long>() }
     var idea by remember { mutableStateOf("") }
+    var tab by remember { mutableStateOf(0) }           // 0 = Create, 1 = History
+    var autoModels by remember { mutableStateOf(true) } // AI makes the 3D models
 
     LaunchedEffect(message) {
         message?.let { snackbar.showSnackbar(it); vm.consumeMessage() }
@@ -83,6 +90,21 @@ fun GameScreen(
                 Icon(Icons.Default.SportsEsports, null, tint = Pink, modifier = Modifier.size(22.dp))
             }
 
+            // Create / History switch
+            TabRow(
+                selectedTabIndex = tab,
+                containerColor = Color.Transparent,
+                contentColor = Cyan,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            ) {
+                Tab(selected = tab == 0, onClick = { tab = 0 },
+                    text = { Text("Create") },
+                    selectedContentColor = Cyan, unselectedContentColor = TextSecondary)
+                Tab(selected = tab == 1, onClick = { tab = 1 },
+                    text = { Text("History (${games.size})") },
+                    selectedContentColor = Cyan, unselectedContentColor = TextSecondary)
+            }
+
             if (busy) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -94,33 +116,23 @@ fun GameScreen(
                 }
             }
 
+            if (tab == 1) {
+                GameHistoryList(
+                    games = games,
+                    onOpen = { vm.openGame(it) },
+                    onDelete = { vm.deleteGame(it) },
+                    onCreate = { tab = 0 },
+                )
+                return@Column
+            }
+
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item {
-                    Text("1 · Pick your 3D models", style = MaterialTheme.typography.labelLarge,
-                        color = TextSecondary)
-                }
-
-                if (models.isEmpty()) {
-                    item { NoModelsHint(onCreateModel) }
-                } else {
-                    items(models, key = { it.id }) { m ->
-                        ModelPick(
-                            model = m,
-                            checked = selected.contains(m.id),
-                            onToggle = {
-                                if (selected.contains(m.id)) selected.remove(m.id) else selected.add(m.id)
-                            },
-                        )
-                    }
-                }
-
-                item {
-                    Spacer(Modifier.height(6.dp))
-                    Text("2 · Describe the game", style = MaterialTheme.typography.labelLarge,
+                    Text("Describe your game", style = MaterialTheme.typography.labelLarge,
                         color = TextSecondary)
                     Spacer(Modifier.height(6.dp))
                     OutlinedTextField(
@@ -129,8 +141,8 @@ fun GameScreen(
                         enabled = !busy,
                         placeholder = {
                             Text(
-                                "e.g. the character runs around a field collecting the coins; " +
-                                    "each coin is 10 points, avoid the trees",
+                                "e.g. a car that races around a track collecting coins; " +
+                                    "each coin is 10 points, avoid the barrels",
                                 color = TextDisabled, style = MaterialTheme.typography.bodySmall,
                             )
                         },
@@ -149,11 +161,61 @@ fun GameScreen(
                     )
                 }
 
+                // AI-makes-the-models toggle (default on: no picking needed)
                 item {
+                    Row(
+                        Modifier.fillMaxWidth().glass().padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, null, tint = Pink, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("AI creates the 3D models", color = TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "VOID designs and generates the characters and props for you — " +
+                                    "you don't pick anything.",
+                                color = TextDisabled, style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        Switch(
+                            checked = autoModels,
+                            onCheckedChange = { autoModels = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Cyan,
+                                checkedTrackColor = Cyan.copy(alpha = 0.35f),
+                            ),
+                        )
+                    }
+                }
+
+                // Manual picker only when the user turns auto off
+                if (!autoModels) {
+                    item {
+                        Text("Use your own 3D models", style = MaterialTheme.typography.labelLarge,
+                            color = TextSecondary)
+                    }
+                    if (models.isEmpty()) {
+                        item { NoModelsHint(onCreateModel) }
+                    } else {
+                        items(models, key = { it.id }) { m ->
+                            ModelPick(
+                                model = m,
+                                checked = selected.contains(m.id),
+                                onToggle = {
+                                    if (selected.contains(m.id)) selected.remove(m.id) else selected.add(m.id)
+                                },
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Spacer(Modifier.height(4.dp))
                     Button(
                         onClick = {
-                            val chosen = models.filter { selected.contains(it.id) }
-                            vm.build(chosen, idea)
+                            if (autoModels) vm.autoBuild(idea)
+                            else vm.build(models.filter { selected.contains(it.id) }, idea)
                         },
                         enabled = !busy && idea.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(
@@ -166,7 +228,7 @@ fun GameScreen(
                             tint = if (!busy && idea.isNotBlank()) TextPrimary else TextDisabled)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (selected.isEmpty()) "Build game (no models)" else "Build game",
+                            if (autoModels) "Generate game" else "Build game",
                             color = if (!busy && idea.isNotBlank()) TextPrimary else TextDisabled,
                         )
                     }
@@ -176,6 +238,73 @@ fun GameScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun GameHistoryList(
+    games: List<GameHistoryItem>,
+    onOpen: (GameHistoryItem) -> Unit,
+    onDelete: (GameHistoryItem) -> Unit,
+    onCreate: () -> Unit,
+) {
+    if (games.isEmpty()) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(Icons.Default.SportsEsports, null, tint = TextDisabled, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("No games yet", color = TextSecondary, style = MaterialTheme.typography.bodyLarge)
+            Text("Every game you generate is saved here, newest first.",
+                color = TextDisabled, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(14.dp))
+            FilledTonalButton(
+                onClick = onCreate,
+                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Purple40),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Add, null, tint = TextPrimary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Create a game", color = TextPrimary)
+            }
+        }
+        return
+    }
+    val fmt = remember { SimpleDateFormat("d MMM yyyy · h:mm a", Locale.getDefault()) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(games, key = { it.id }) { g ->
+            Row(
+                Modifier.fillMaxWidth().glass().clickable { onOpen(g) }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
+                        .background(Purple40.copy(alpha = 0.30f)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Default.SportsEsports, null, tint = Pink, modifier = Modifier.size(20.dp)) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(g.name, color = TextPrimary, style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium, maxLines = 1)
+                    Text(fmt.format(Date(g.createdAt)), color = TextDisabled,
+                        style = MaterialTheme.typography.labelSmall)
+                }
+                IconButton(onClick = { onOpen(g) }) {
+                    Icon(Icons.Default.IosShare, "Open", tint = Cyan, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { onDelete(g) }) {
+                    Icon(Icons.Default.DeleteOutline, "Delete", tint = TextDisabled, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+        item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
