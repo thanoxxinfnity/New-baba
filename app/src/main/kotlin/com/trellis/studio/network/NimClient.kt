@@ -46,6 +46,13 @@ class NimClient {
         maxTokens: Int = 2048,
         temperature: Double = 0.7,
         isVisionModel: Boolean = false,
+        /**
+         * Override the read timeout for long-form generation. Writing a whole
+         * game as GDScript legitimately takes ~90s and can pass the default 120s
+         * on a bigger game, which surfaced as "the model took too long". Callers
+         * that expect a long answer pass a larger budget here.
+         */
+        readTimeoutSeconds: Int? = null,
     ): Result<ChatResult> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(Exception("NVIDIA API key is missing. Add it in Settings."))
@@ -74,8 +81,14 @@ class NimClient {
             .post(body)
             .build()
 
+        val callClient = if (readTimeoutSeconds != null)
+            client.newBuilder()
+                .readTimeout(readTimeoutSeconds.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+        else client
+
         RateLimiter.nvidia.withRetry(retryAfterMillis = ::retryAfter) {
-            client.newCall(request).execute().use { response ->
+            callClient.newCall(request).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 when {
                     response.code == 401 || response.code == 403 ->

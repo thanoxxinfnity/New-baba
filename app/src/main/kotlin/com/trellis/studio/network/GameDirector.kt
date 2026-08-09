@@ -88,6 +88,7 @@ class GameDirector(private val nim: NimClient = NimClient()) {
             turns = listOf(ChatTurn("system", SYSTEM_PROMPT), ChatTurn("user", user)),
             maxTokens = 6000,
             temperature = 0.3,
+            readTimeoutSeconds = 240,   // a full game takes ~90s; give it room
         ).map { it.content.ifBlank { it.reasoning.orEmpty() } }
             .mapCatching { code ->
                 require(code.contains("func _ready") || code.contains("extends")) {
@@ -112,6 +113,7 @@ class GameDirector(private val nim: NimClient = NimClient()) {
             turns = listOf(ChatTurn("system", REVIEW_PROMPT), ChatTurn("user", "Fix this main.gd:\n\n$code")),
             maxTokens = 8000,
             temperature = 0.1,
+            readTimeoutSeconds = 240,
         ).map { it.content.ifBlank { it.reasoning.orEmpty() } }
             .mapCatching { fixed ->
                 require(fixed.contains("func _ready") || fixed.contains("extends")) {

@@ -155,7 +155,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         }
         val modelLines = resInputs.map { (input, resName) -> "- $resName.glb : ${input.role}" }
 
-        _status.value = "Writing the game code…"
+        _status.value = "Writing & checking the game code… (up to ~2 min)"
         director.write(apiKey, model, idea, modelLines)
             .onSuccess { code ->
                 _status.value = "Assembling the Godot project…"
