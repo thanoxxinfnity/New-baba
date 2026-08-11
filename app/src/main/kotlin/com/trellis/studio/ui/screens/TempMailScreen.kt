@@ -63,6 +63,11 @@ fun TempMailScreen(vm: TempMailViewModel = viewModel(), onMenu: () -> Unit = {})
                         if (addr != null) IconButton(onClick = { clip.setText(AnnotatedString(addr)) }) {
                             Icon(Icons.Default.ContentCopy, "Copy", tint = TextSecondary, modifier = Modifier.size(18.dp))
                         }
+                        s.selected?.let { acc ->
+                            IconButton(onClick = { vm.delete(acc) }) {
+                                Icon(Icons.Default.DeleteOutline, "Delete inbox", tint = Pink, modifier = Modifier.size(18.dp))
+                            }
+                        }
                     }
                 }
             }

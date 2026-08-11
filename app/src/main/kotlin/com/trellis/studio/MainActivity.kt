@@ -117,6 +117,7 @@ val drawerEntries = listOf(
     DrawerEntry("charging", "Charging Display", Icons.Filled.BatteryChargingFull, "Bedside battery screen", "Tools"),
     DrawerEntry("screentest", "Screen Test", Icons.Filled.Smartphone, "Check for dead pixels", "Tools"),
     DrawerEntry("tempmail", "Temp Inbox", Icons.Filled.AlternateEmail, "Throwaway email, keep yours private", "Tools"),
+    DrawerEntry("fakecall", "Fake Call", Icons.Filled.Call, "Prank a friend with a fake call", "Tools"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
 )
@@ -312,6 +313,7 @@ fun MainContent() {
                     composable("charging") { ChargingDisplayScreen(onMenu = openDrawer) }
                     composable("screentest") { ScreenTestScreen(onMenu = openDrawer) }
                     composable("tempmail") { TempMailScreen(onMenu = openDrawer) }
+                    composable("fakecall") { FakeCallScreen(onMenu = openDrawer) }
                     composable(NavRoute.Personas.route) {
                         PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
                     }
