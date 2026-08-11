@@ -116,6 +116,7 @@ val drawerEntries = listOf(
     DrawerEntry("gradientwall", "Wallpaper Studio", Icons.Filled.Wallpaper, "Neon gradient wallpapers", "Tools"),
     DrawerEntry("charging", "Charging Display", Icons.Filled.BatteryChargingFull, "Bedside battery screen", "Tools"),
     DrawerEntry("screentest", "Screen Test", Icons.Filled.Smartphone, "Check for dead pixels", "Tools"),
+    DrawerEntry("tempmail", "Temp Inbox", Icons.Filled.AlternateEmail, "Throwaway email, keep yours private", "Tools"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
 )
@@ -310,6 +311,7 @@ fun MainContent() {
                     composable("gradientwall") { GradientWallpaperScreen(onMenu = openDrawer) }
                     composable("charging") { ChargingDisplayScreen(onMenu = openDrawer) }
                     composable("screentest") { ScreenTestScreen(onMenu = openDrawer) }
+                    composable("tempmail") { TempMailScreen(onMenu = openDrawer) }
                     composable(NavRoute.Personas.route) {
                         PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
                     }

@@ -58,6 +58,9 @@ class AppPrefs(private val context: Context) {
 
         val KEY_BOOSTER_AUTO     = booleanPreferencesKey("booster_auto")
         val KEY_BOOSTER_INTERVAL = intPreferencesKey("booster_interval_min")
+        // Disposable inboxes: one "address\tpassword" per line. They persist so an
+        // inbox is never lost, and you can keep as many as you make.
+        val KEY_TEMP_MAILS       = stringPreferencesKey("temp_mails")
         // A public XTTS voice-clone Space, verified live to clone in Hindi/Indian
         // accent from an uploaded sample. It runs on CPU (no ZeroGPU daily quota),
         // so it stays reliable where a shared GPU Space fails once quota runs out —
@@ -112,6 +115,7 @@ class AppPrefs(private val context: Context) {
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
     val boosterAuto: Flow<Boolean> = ds.data.catchIO().map { it[KEY_BOOSTER_AUTO] ?: false }
     val boosterInterval: Flow<Int> = ds.data.catchIO().map { it[KEY_BOOSTER_INTERVAL] ?: 5 }
+    val tempMails: Flow<String> = ds.data.catchIO().map { it[KEY_TEMP_MAILS] ?: "" }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }
@@ -140,6 +144,15 @@ class AppPrefs(private val context: Context) {
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
     suspend fun setBoosterAuto(v: Boolean) = ds.edit { it[KEY_BOOSTER_AUTO] = v }
     suspend fun setBoosterInterval(v: Int) = ds.edit { it[KEY_BOOSTER_INTERVAL] = v }
+    suspend fun addTempMail(address: String, password: String) = ds.edit {
+        val cur = it[KEY_TEMP_MAILS] ?: ""
+        it[KEY_TEMP_MAILS] = ("$address\t$password\n" + cur)
+    }
+    suspend fun removeTempMail(address: String) = ds.edit { p ->
+        val kept = (p[KEY_TEMP_MAILS] ?: "").lineSequence()
+            .filter { it.isNotBlank() && it.substringBefore('\t') != address }
+        p[KEY_TEMP_MAILS] = kept.joinToString("\n").let { if (it.isBlank()) "" else it + "\n" }
+    }
 }
 
 private fun Flow<Preferences>.catchIO() = catch { e ->
