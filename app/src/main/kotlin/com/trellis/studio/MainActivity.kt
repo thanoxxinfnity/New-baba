@@ -55,7 +55,6 @@ sealed class NavRoute(
     object Voice : NavRoute("voice", "Voice", Icons.Outlined.GraphicEq, Icons.Filled.GraphicEq)
     object Animate : NavRoute("animate", "Animate", Icons.Outlined.Animation, Icons.Filled.Animation)
     object Artifacts : NavRoute("artifacts", "Builds", Icons.Outlined.Android, Icons.Filled.Android)
-    object Agent : NavRoute("agent", "Agent", Icons.Outlined.SmartToy, Icons.Filled.SmartToy)
     object Game : NavRoute("game", "Game", Icons.Outlined.SportsEsports, Icons.Filled.SportsEsports)
     object Video : NavRoute("video", "Video", Icons.Outlined.Movie, Icons.Filled.Movie)
     object LiveVoice : NavRoute("livevoice", "Live Voice", Icons.Outlined.RecordVoiceOver, Icons.Filled.RecordVoiceOver)
@@ -78,6 +77,7 @@ val bottomNavItems = listOf(
 /** Every destination, grouped, for the side drawer. */
 val drawerEntries = listOf(
     DrawerEntry("chat", "Chat", Icons.AutoMirrored.Filled.Chat, "Talk, code, generate images", "Workspace"),
+    DrawerEntry("spark", "Spark", Icons.Filled.AutoAwesome, "Describe an app — get a real one", "Workspace"),
     DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
@@ -94,7 +94,28 @@ val drawerEntries = listOf(
     DrawerEntry("terminal", "Terminal", Icons.Filled.Terminal, "Local shell or your machine", "Developer"),
     DrawerEntry("artifacts", "Builds", Icons.Filled.Android, "APKs, files and build logs", "Developer"),
     DrawerEntry("browser", "Browser", Icons.Filled.Public, "Real Google search", "Developer"),
-    DrawerEntry("agent", "AI Agent", Icons.Filled.SmartToy, "Let the AI control the phone", "Developer"),
+
+    // ── Tools & fun ──
+    DrawerEntry("focustimer", "Focus Timer", Icons.Filled.Timer, "Pomodoro for gaming & study", "Tools"),
+    DrawerEntry("stopwatch", "Stopwatch", Icons.Filled.Timelapse, "Time with laps", "Tools"),
+    DrawerEntry("dicecoin", "Dice & Coin", Icons.Filled.Casino, "Roll or flip", "Tools"),
+    DrawerEntry("randompicker", "Random Picker", Icons.Filled.Shuffle, "Let fate decide", "Tools"),
+    DrawerEntry("passwordgen", "Password Gen", Icons.Filled.Password, "Strong random passwords", "Tools"),
+    DrawerEntry("unitconverter", "Unit Converter", Icons.Filled.SwapHoriz, "Length, weight, temp", "Tools"),
+    DrawerEntry("fancytext", "Fancy Text", Icons.Filled.TextFields, "Cool fonts for your bio", "Tools"),
+    DrawerEntry("colorpalette", "Color Palette", Icons.Filled.Palette, "Fresh color schemes", "Tools"),
+    DrawerEntry("gamertag", "Gamertag Gen", Icons.Filled.SportsEsports, "AI names for games", "Tools"),
+    DrawerEntry("memecaption", "Meme Captions", Icons.Filled.EmojiEmotions, "AI funny captions", "Tools"),
+    DrawerEntry("quickai", "AI Fun", Icons.Filled.AutoAwesome, "Roast, joke, fortune", "Tools"),
+    DrawerEntry("compass", "Compass", Icons.Filled.Explore, "Find your bearing", "Tools"),
+    DrawerEntry("level", "Bubble Level", Icons.Filled.Straighten, "Is it straight?", "Tools"),
+    DrawerEntry("soundmeter", "Sound Meter", Icons.Filled.GraphicEq, "How loud is it?", "Tools"),
+    DrawerEntry("flashlight", "Flashlight", Icons.Filled.FlashlightOn, "Light it up", "Tools"),
+    DrawerEntry("shakeboost", "Shake to Boost", Icons.Filled.Vibration, "Shake to free RAM", "Tools"),
+    DrawerEntry("ttsreader", "Read Aloud", Icons.Filled.VolumeUp, "Text to speech", "Tools"),
+    DrawerEntry("gradientwall", "Wallpaper Studio", Icons.Filled.Wallpaper, "Neon gradient wallpapers", "Tools"),
+    DrawerEntry("charging", "Charging Display", Icons.Filled.BatteryChargingFull, "Bedside battery screen", "Tools"),
+    DrawerEntry("screentest", "Screen Test", Icons.Filled.Smartphone, "Check for dead pixels", "Tools"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
 )
@@ -256,7 +277,7 @@ fun MainContent() {
                             onCreateModel = { go(NavRoute.Generate.route) },
                         )
                     }
-                    composable(NavRoute.Agent.route) { AgentScreen(onMenu = openDrawer) }
+                    composable("spark") { SparkScreen(onMenu = openDrawer) }
                     composable(NavRoute.Game.route) {
                         GameScreen(
                             onMenu = openDrawer,
@@ -269,6 +290,26 @@ fun MainContent() {
                     composable(NavRoute.IdeaLab.route) { IdeaLabScreen(onMenu = openDrawer) }
                     composable(NavRoute.Stats.route) { StatsScreen(onMenu = openDrawer) }
                     composable(NavRoute.Device.route) { DeviceScreen(onMenu = openDrawer) }
+                    composable("focustimer") { FocusTimerScreen(onMenu = openDrawer) }
+                    composable("stopwatch") { StopwatchScreen(onMenu = openDrawer) }
+                    composable("dicecoin") { DiceCoinScreen(onMenu = openDrawer) }
+                    composable("randompicker") { RandomPickerScreen(onMenu = openDrawer) }
+                    composable("passwordgen") { PasswordGenScreen(onMenu = openDrawer) }
+                    composable("unitconverter") { UnitConverterScreen(onMenu = openDrawer) }
+                    composable("fancytext") { FancyTextScreen(onMenu = openDrawer) }
+                    composable("colorpalette") { ColorPaletteScreen(onMenu = openDrawer) }
+                    composable("gamertag") { GamertagScreen(onMenu = openDrawer) }
+                    composable("memecaption") { MemeCaptionScreen(onMenu = openDrawer) }
+                    composable("quickai") { QuickAiScreen(onMenu = openDrawer) }
+                    composable("compass") { CompassScreen(onMenu = openDrawer) }
+                    composable("level") { LevelScreen(onMenu = openDrawer) }
+                    composable("soundmeter") { SoundMeterScreen(onMenu = openDrawer) }
+                    composable("flashlight") { FlashlightScreen(onMenu = openDrawer) }
+                    composable("shakeboost") { ShakeBoostScreen(onMenu = openDrawer) }
+                    composable("ttsreader") { TtsReaderScreen(onMenu = openDrawer) }
+                    composable("gradientwall") { GradientWallpaperScreen(onMenu = openDrawer) }
+                    composable("charging") { ChargingDisplayScreen(onMenu = openDrawer) }
+                    composable("screentest") { ScreenTestScreen(onMenu = openDrawer) }
                     composable(NavRoute.Personas.route) {
                         PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
                     }
