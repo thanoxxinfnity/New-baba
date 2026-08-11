@@ -117,7 +117,7 @@ fun ImageViewerScreen(
                 .onSizeChanged { boxSize = it }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 6f)
+                        scale = (scale * zoom).coerceIn(1f, 50f)
                         if (scale > 1f) {
                             offsetX += pan.x
                             offsetY += pan.y
