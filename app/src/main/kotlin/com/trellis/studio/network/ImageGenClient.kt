@@ -52,7 +52,9 @@ class ImageGenClient(private val context: Context) {
         apiKey: String, model: ImageModel, prompt: String,
         width: Int, height: Int, seed: Long,
     ): Result<String> {
-        if (apiKey.isBlank()) return Result.failure(Exception("NVIDIA API key missing. Add it in Settings."))
+        // Without a key, or if NVIDIA FLUX fails (quota, capacity), fall back to
+        // free Pollinations so the user still gets an image instead of an error.
+        if (apiKey.isBlank()) return generatePollinations(prompt, width, height, seed, apiKey)
         val reqBody = FluxImageRequest(prompt = prompt, width = width, height = height, seed = seed)
         val body = json.encodeToString(reqBody).asJsonBody(JSON_MEDIA)
         val request = Request.Builder()
@@ -61,11 +63,15 @@ class ImageGenClient(private val context: Context) {
             .header("Content-Type", "application/json")
             .post(body)
             .build()
-        return runCatching {
+        val result = runCatching {
             client.newCall(request).execute().use { response ->
                 handleImageResponse(response, "flux_${System.currentTimeMillis()}")
             }
-        }.recoverWithMessage()
+        }
+        return result.recoverCatching {
+            // NVIDIA didn't deliver — use the free path rather than failing.
+            generatePollinations(prompt, width, height, seed, apiKey).getOrThrow()
+        }
     }
 
     private suspend fun generateSdxl(

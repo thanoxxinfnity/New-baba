@@ -68,7 +68,7 @@ class AppPrefs(private val context: Context) {
         val DEFAULT_GAME_MODEL   = "z-ai/glm-5.2"
 
         val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
-        val DEFAULT_IMG     = "pollinations/flux"
+        val DEFAULT_IMG     = "black-forest-labs/flux.1-dev"
         val DEFAULT_3D      = "nvidia"
         // Riva voice, not a NIM model id — TTS goes over gRPC to a function id.
         val DEFAULT_TTS     = "Magpie-Multilingual.EN-US.Sofia"

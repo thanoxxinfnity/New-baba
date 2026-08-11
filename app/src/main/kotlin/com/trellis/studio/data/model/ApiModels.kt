@@ -102,8 +102,12 @@ data class FluxImageRequest(
     val prompt: String,
     val width: Int = 1024,
     val height: Int = 1024,
-    @SerialName("num_inference_steps") val steps: Int = 20,
-    val guidance: Double = 3.5,
+    // Verified live against black-forest-labs/flux.1-dev: it accepts `steps` and
+    // `cfg_scale` and REJECTS `num_inference_steps`/`guidance` with 422
+    // "Extra inputs are not permitted" — which is why NVIDIA FLUX never worked
+    // before. 25 steps returns a photoreal image in ~5s.
+    val steps: Int = 25,
+    @SerialName("cfg_scale") val cfgScale: Double = 3.5,
     val seed: Long = 0L,
 )
 

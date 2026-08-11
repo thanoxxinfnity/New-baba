@@ -81,6 +81,22 @@ val NIM_LLM_GROUPS: Map<String, List<LlmModel>> by lazy {
 // NVIDIA FLUX/SDXL endpoints require a separate paid image-gen plan.
 // -----------------------------------------------------------------------
 val NIM_IMAGE_MODELS: List<ImageModel> = listOf(
+    // NVIDIA FLUX.1 — photoreal, needs the nvapi- key. Verified live: `steps` +
+    // `cfg_scale`, ~5s a 1024² image. This is the realistic default.
+    ImageModel(
+        id = "black-forest-labs/flux.1-dev",
+        displayName = "FLUX.1 dev (Realistic)",
+        category = "NVIDIA — Realistic",
+        apiBaseUrl = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev",
+        apiStyle = ImageApiStyle.FLUX,
+    ),
+    ImageModel(
+        id = "black-forest-labs/flux.1-schnell",
+        displayName = "FLUX.1 schnell (Fast, realistic)",
+        category = "NVIDIA — Realistic",
+        apiBaseUrl = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-schnell",
+        apiStyle = ImageApiStyle.FLUX,
+    ),
     ImageModel(
         id = "pollinations/flux",
         displayName = "FLUX (Free, no key)",

@@ -74,8 +74,12 @@ class TrellisClient(private val context: Context) {
     /** Mesh density preference, applied by steering the prompt. */
     enum class Detail(val label: String, val hint: String) {
         LOW("Low poly", "low poly, simplified geometry, flat shaded, game asset"),
-        STANDARD("Standard", ""),
-        HIGH("High detail", "highly detailed, intricate surface detail, high resolution mesh"),
+        // A quality nudge on the standard path: TRELLIS makes more complete,
+        // properly textured single objects when the prompt asks for exactly that,
+        // which reduces the "missing part / no texture" results.
+        STANDARD("Standard", "a single complete object, fully textured, clean geometry, plain background"),
+        HIGH("High detail", "a single complete object, highly detailed, intricate surface detail, " +
+            "high resolution mesh, fully textured, plain background"),
     }
 
     suspend fun generateFromText(
