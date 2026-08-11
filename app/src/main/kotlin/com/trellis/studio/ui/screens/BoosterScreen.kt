@@ -2,6 +2,7 @@ package com.trellis.studio.ui.screens
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,10 +11,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,6 +39,21 @@ fun BoosterScreen(
     onMenu: () -> Unit = {},
 ) {
     val s by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Send the user to grant "draw over other apps" when the HUD needs it.
+    LaunchedEffect(s.needsOverlayPermission) {
+        if (s.needsOverlayPermission) {
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            vm.clearOverlayPrompt()
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         Surface(color = SurfDark) {
@@ -74,6 +95,44 @@ fun BoosterScreen(
                     if (s.mem.low) Text("Android reports low memory", color = Pink,
                         style = MaterialTheme.typography.labelSmall)
                 }
+            }
+
+            // ---- Game Mode (one tap: boost + auto + HUD) ----
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(Brush.horizontalGradient(listOf(Purple40, Pink)))
+                    .clickable { vm.gameMode() }
+                    .padding(vertical = 18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.SportsEsports, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Start Game Mode", color = Color.White,
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+            Text("Boosts now, keeps auto-boost on, and floats a RAM meter over your game.",
+                color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+
+            // ---- Floating HUD toggle ----
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardDark)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Speed, null, tint = Cyan, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Floating Gaming HUD", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                    Text("A draggable RAM% + clock chip over other apps. Tap it to boost.",
+                        color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+                }
+                Switch(
+                    checked = s.hudOn,
+                    onCheckedChange = { vm.toggleHud() },
+                    colors = SwitchDefaults.colors(checkedThumbColor = Cyan, checkedTrackColor = Cyan.copy(alpha = 0.35f)),
+                )
             }
 
             // ---- Boost now ----

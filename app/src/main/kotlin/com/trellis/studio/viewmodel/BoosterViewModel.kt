@@ -3,8 +3,10 @@ package com.trellis.studio.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.provider.Settings
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.service.BoosterService
+import com.trellis.studio.service.GamingHudService
 import com.trellis.studio.util.GameBooster
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +28,8 @@ class BoosterViewModel(app: Application) : AndroidViewModel(app) {
         val lastTrimmed: Int? = null,
         val auto: Boolean = false,
         val intervalMin: Int = 5,
+        val hudOn: Boolean = false,
+        val needsOverlayPermission: Boolean = false,
     )
 
     private val _state = MutableStateFlow(State())
@@ -79,5 +83,31 @@ class BoosterViewModel(app: Application) : AndroidViewModel(app) {
             // Re-arm with the new interval if it's currently running.
             if (_state.value.auto) BoosterService.start(getApplication(), min)
         }
+    }
+
+    /** Toggles the floating Gaming HUD; needs the draw-over-apps permission. */
+    fun toggleHud(): Boolean {
+        val ctx = getApplication<Application>()
+        if (_state.value.hudOn) {
+            GamingHudService.stop(ctx)
+            _state.update { it.copy(hudOn = false) }
+            return true
+        }
+        if (!Settings.canDrawOverlays(ctx)) {
+            _state.update { it.copy(needsOverlayPermission = true) }
+            return false
+        }
+        GamingHudService.start(ctx)
+        _state.update { it.copy(hudOn = true) }
+        return true
+    }
+
+    fun clearOverlayPrompt() = _state.update { it.copy(needsOverlayPermission = false) }
+
+    /** One-tap Game Mode: boost now, turn on auto-boost, and show the HUD. */
+    fun gameMode() {
+        boostNow()
+        if (!_state.value.auto) setAuto(true)
+        if (!_state.value.hudOn) toggleHud()
     }
 }

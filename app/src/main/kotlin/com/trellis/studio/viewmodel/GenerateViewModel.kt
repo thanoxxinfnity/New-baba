@@ -25,6 +25,7 @@ data class GenerateUiState(
     val imageSeed: Long = 0L,
     val selectedImageModelId: String = AppPrefs.DEFAULT_IMG,
     val isGeneratingImage: Boolean = false,
+    val isEnhancing: Boolean = false,
     val generatedImagePath: String? = null,
     // 3D tab
     val sourceImagePath: String? = null,
@@ -45,6 +46,7 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs   = AppPrefs(app)
     private val imgClient= ImageGenClient(app)
     private val trellisClient = TrellisClient(app)
+    private val enhancer = com.trellis.studio.network.PromptEnhancer()
     private val db      = AppDatabase.get(app)
 
     private val _state = MutableStateFlow(GenerateUiState())
@@ -60,6 +62,20 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setImagePrompt(v: String)    = _state.update { it.copy(imagePrompt = v) }
+
+    /** ✨ Magic Prompt: rewrite the short idea into a rich, detailed prompt. */
+    fun enhancePrompt() {
+        val s = _state.value
+        if (s.imagePrompt.isBlank() || s.isEnhancing) return
+        viewModelScope.launch {
+            _state.update { it.copy(isEnhancing = true) }
+            val apiKey = prefs.nvidiaKey.first()
+            val model = prefs.selectedLlm.first()
+            enhancer.enhance(apiKey, model, s.imagePrompt, forImage = true)
+                .onSuccess { rich -> _state.update { it.copy(imagePrompt = rich, isEnhancing = false) } }
+                .onFailure { _state.update { it.copy(isEnhancing = false) } }
+        }
+    }
     fun setNegativePrompt(v: String) = _state.update { it.copy(negativePrompt = v) }
     fun setImageWidth(v: Int)        = _state.update { it.copy(imageWidth = v) }
     fun setImageHeight(v: Int)       = _state.update { it.copy(imageHeight = v) }

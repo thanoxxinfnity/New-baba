@@ -60,6 +60,10 @@ sealed class NavRoute(
     object Video : NavRoute("video", "Video", Icons.Outlined.Movie, Icons.Filled.Movie)
     object LiveVoice : NavRoute("livevoice", "Live Voice", Icons.Outlined.RecordVoiceOver, Icons.Filled.RecordVoiceOver)
     object Booster : NavRoute("booster", "Booster", Icons.Outlined.Bolt, Icons.Filled.Bolt)
+    object IdeaLab : NavRoute("idealab", "Idea Lab", Icons.Outlined.Casino, Icons.Filled.Casino)
+    object Stats : NavRoute("stats", "Stats", Icons.Outlined.EmojiEvents, Icons.Filled.EmojiEvents)
+    object Device : NavRoute("device", "Device", Icons.Outlined.Memory, Icons.Filled.Memory)
+    object Personas : NavRoute("personas", "AI Vibes", Icons.Outlined.TheaterComedy, Icons.Filled.TheaterComedy)
     object Settings : NavRoute("settings", "Settings", Icons.Outlined.Settings, Icons.Filled.Settings)
 }
 
@@ -79,6 +83,10 @@ val drawerEntries = listOf(
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
     DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
     DrawerEntry("booster", "Game Booster", Icons.Filled.Bolt, "Free memory for smoother games", "Workspace"),
+    DrawerEntry("idealab", "Idea Lab", Icons.Filled.Casino, "Surprise-me creative prompts", "Workspace"),
+    DrawerEntry("personas", "AI Vibes", Icons.Filled.TheaterComedy, "Give the chat a personality", "Workspace"),
+    DrawerEntry("stats", "Your Stats", Icons.Filled.EmojiEvents, "Creations, streaks and badges", "Workspace"),
+    DrawerEntry("device", "Device", Icons.Filled.Memory, "Live RAM, battery, storage", "Developer"),
     DrawerEntry("video", "Video Studio", Icons.Filled.Movie, "Text → a real video, scene by scene", "Workspace"),
     DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "NVIDIA cloud TTS and voice cloning", "Workspace"),
     DrawerEntry("livevoice", "Live Voice", Icons.Filled.RecordVoiceOver, "Talk to the AI out loud, in your voice", "Workspace"),
@@ -258,6 +266,12 @@ fun MainContent() {
                     composable(NavRoute.Video.route) { VideoScreen(onMenu = openDrawer) }
                     composable(NavRoute.LiveVoice.route) { LiveVoiceScreen(onMenu = openDrawer) }
                     composable(NavRoute.Booster.route) { BoosterScreen(onMenu = openDrawer) }
+                    composable(NavRoute.IdeaLab.route) { IdeaLabScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Stats.route) { StatsScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Device.route) { DeviceScreen(onMenu = openDrawer) }
+                    composable(NavRoute.Personas.route) {
+                        PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
+                    }
                     composable(NavRoute.Settings.route) { SettingsScreen(onMenu = openDrawer) }
 
                     // The image viewer existed but had no route, so tapping a

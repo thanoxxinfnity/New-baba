@@ -100,6 +100,17 @@ fun ImageViewerScreen(
                             Icon(Icons.Default.AutoFixHigh, "Edit with AI", tint = Cyan)
                         }
                         IconButton(onClick = {
+                            if (file.exists()) scope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                                        android.app.WallpaperManager.getInstance(context).setBitmap(bmp)
+                                    }.isSuccess
+                                }
+                                snackbar.showSnackbar(if (ok) "Set as wallpaper 🖼️" else "Couldn't set wallpaper.")
+                            }
+                        }) { Icon(Icons.Default.Wallpaper, "Set as wallpaper", tint = Pink) }
+                        IconButton(onClick = {
                             if (file.exists()) FileExport.share(context, file, "image/*")
                         }) { Icon(Icons.Default.Share, "Share", tint = TextSecondary) }
                     },

@@ -109,6 +109,11 @@ private fun ImageGenerateTab(
     var showModelSelector by remember { mutableStateOf(false) }
     val currentModel = NIM_IMAGE_MODELS.find { it.id == state.selectedImageModelId }
 
+    var celebrate by remember { mutableStateOf(false) }
+    LaunchedEffect(state.generatedImagePath) {
+        if (state.generatedImagePath != null) { celebrate = true; kotlinx.coroutines.delay(1500); celebrate = false }
+    }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Model selector
         Card(
@@ -142,6 +147,16 @@ private fun ImageGenerateTab(
             ),
             shape = RoundedCornerShape(14.dp),
             maxLines = 6,
+            trailingIcon = {
+                // ✨ Magic Prompt: expand the idea into a rich, detailed prompt.
+                if (state.isEnhancing) {
+                    CircularProgressIndicator(Modifier.size(20.dp), color = Pink, strokeWidth = 2.dp)
+                } else if (state.imagePrompt.isNotBlank()) {
+                    IconButton(onClick = vm::enhancePrompt) {
+                        Icon(Icons.Default.AutoAwesome, "Magic Prompt", tint = Pink)
+                    }
+                }
+            },
         )
 
         // Negative prompt
@@ -232,6 +247,8 @@ private fun ImageGenerateTab(
                 }
             }
         }
+    }
+        com.trellis.studio.ui.components.ConfettiBurst(play = celebrate)
     }
 
     if (showModelSelector) {
