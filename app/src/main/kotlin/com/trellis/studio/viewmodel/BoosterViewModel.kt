@@ -25,7 +25,7 @@ class BoosterViewModel(app: Application) : AndroidViewModel(app) {
         val lastFreedMb: Long? = null,
         val lastTrimmed: Int? = null,
         val auto: Boolean = false,
-        val intervalMin: Int = 3,
+        val intervalMin: Int = 5,
     )
 
     private val _state = MutableStateFlow(State())

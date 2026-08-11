@@ -45,31 +45,43 @@ object GameBooster {
     }
 
     /**
-     * Frees background memory and returns what it recovered. Enumerates the
-     * user's non-system apps and asks Android to kill each one's background
-     * (cached) processes — leaving the current foreground game untouched.
+     * Frees as much background memory as Android allows and returns what it
+     * recovered. It asks the OS to kill every user-installed app's background
+     * (cached) processes — twice, with a short pause, because some apps respawn a
+     * helper the second pass can also clear — then GCs our own heap.
+     *
+     * What it never touches: the app you're using. [killBackgroundProcesses]
+     * only affects BACKGROUND/cached processes; the foreground app (your game)
+     * and the currently-active apps are protected by Android and are also skipped
+     * explicitly here. Freeing 100% of RAM isn't possible without root — the OS,
+     * system services and the foreground app always hold memory.
      */
     suspend fun boost(context: Context): BoostResult = withContext(Dispatchers.Default) {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val before = memory(context).availMb
         val self = context.packageName
+        val active = activePackages(am) + self
 
         var trimmed = 0
-        runCatching {
-            val pm = context.packageManager
-            val apps = pm.getInstalledApplications(0)
-            for (app in apps) {
-                // Skip our own app and system apps (killing those is a no-op and
-                // Android protects them anyway). Only user-installed apps have
-                // background caches worth releasing.
-                if (app.packageName == self) continue
-                if ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
-                    (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
-                ) continue
-                runCatching { am.killBackgroundProcesses(app.packageName); trimmed++ }
+        repeat(2) { pass ->
+            runCatching {
+                val apps = context.packageManager.getInstalledApplications(0)
+                for (app in apps) {
+                    // Skip the apps in active/foreground use and system apps
+                    // (killing those is a no-op Android blocks anyway). Only
+                    // user-installed, backgrounded apps have caches worth freeing.
+                    if (app.packageName in active) continue
+                    if ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                        (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
+                    ) continue
+                    runCatching {
+                        am.killBackgroundProcesses(app.packageName)
+                        if (pass == 0) trimmed++
+                    }
+                }
             }
+            if (pass == 0) kotlinx.coroutines.delay(400)
         }
-        // Release our own garbage too, so the reading reflects real free memory.
         System.gc()
         Runtime.getRuntime().gc()
 
@@ -77,6 +89,16 @@ object GameBooster {
         val freed = (after.availMb - before).coerceAtLeast(0)
         BoostResult(freed, after, trimmed)
     }
+
+    /** Packages Android reports as currently running in the foreground/visible. */
+    private fun activePackages(am: ActivityManager): Set<String> = runCatching {
+        am.runningAppProcesses.orEmpty()
+            .filter {
+                it.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+            }
+            .flatMap { it.pkgList?.toList() ?: listOf(it.processName) }
+            .toSet()
+    }.getOrDefault(emptySet())
 
     private const val MB = 1024L * 1024L
 }

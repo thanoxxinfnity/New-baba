@@ -91,7 +91,7 @@ class BoosterService : Service() {
         private const val CHANNEL_ID = "game_booster"
         private const val NOTIF_ID = 4711
         const val EXTRA_INTERVAL_MIN = "interval_min"
-        const val DEFAULT_INTERVAL_MIN = 3
+        const val DEFAULT_INTERVAL_MIN = 5
 
         fun start(context: Context, intervalMin: Int) {
             val intent = Intent(context, BoosterService::class.java)

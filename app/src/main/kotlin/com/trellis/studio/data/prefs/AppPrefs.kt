@@ -111,7 +111,7 @@ class AppPrefs(private val context: Context) {
     val hfVoiceSpace: Flow<String> = ds.data.catchIO().map { it[KEY_HF_VOICE_SPACE]?.ifBlank { DEFAULT_HF_VOICE_SPACE } ?: DEFAULT_HF_VOICE_SPACE }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
     val boosterAuto: Flow<Boolean> = ds.data.catchIO().map { it[KEY_BOOSTER_AUTO] ?: false }
-    val boosterInterval: Flow<Int> = ds.data.catchIO().map { it[KEY_BOOSTER_INTERVAL] ?: 3 }
+    val boosterInterval: Flow<Int> = ds.data.catchIO().map { it[KEY_BOOSTER_INTERVAL] ?: 5 }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }

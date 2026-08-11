@@ -146,10 +146,12 @@ fun BoosterScreen(
                         Text("How it really works", color = TextPrimary, style = MaterialTheme.typography.labelLarge)
                     }
                     Text(
-                        "Boost frees other apps' cached background memory so your game has more " +
-                            "room — it never closes the game or foreground apps. Android re-caches " +
-                            "over time, so boosting helps for a while rather than permanently. The " +
-                            "freed number is measured before/after, not invented.",
+                        "Boost frees as much background (cached) memory as Android allows, in two " +
+                            "passes, so your game gets more room. It never touches the app you're " +
+                            "using — the foreground app is protected and skipped. Freeing 100% of " +
+                            "RAM isn't possible without root (the system and the running app always " +
+                            "keep some), and Android re-caches over time, so a boost helps for a " +
+                            "while. The freed number is measured before/after, not invented.",
                         color = TextSecondary, style = MaterialTheme.typography.bodySmall,
                     )
                 }
