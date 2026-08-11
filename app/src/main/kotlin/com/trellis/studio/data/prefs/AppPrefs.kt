@@ -55,6 +55,9 @@ class AppPrefs(private val context: Context) {
         val KEY_HF_VOICE_SPACE   = stringPreferencesKey("hf_voice_space_url")
         const val VOICE_PROVIDER_NVIDIA = "nvidia"
         const val VOICE_PROVIDER_HF     = "huggingface"
+
+        val KEY_BOOSTER_AUTO     = booleanPreferencesKey("booster_auto")
+        val KEY_BOOSTER_INTERVAL = intPreferencesKey("booster_interval_min")
         // A public XTTS voice-clone Space, verified live to clone in Hindi/Indian
         // accent from an uploaded sample. It runs on CPU (no ZeroGPU daily quota),
         // so it stays reliable where a shared GPU Space fails once quota runs out —
@@ -107,6 +110,8 @@ class AppPrefs(private val context: Context) {
     val hfToken: Flow<String> = ds.data.catchIO().map { it[KEY_HF_TOKEN] ?: "" }
     val hfVoiceSpace: Flow<String> = ds.data.catchIO().map { it[KEY_HF_VOICE_SPACE]?.ifBlank { DEFAULT_HF_VOICE_SPACE } ?: DEFAULT_HF_VOICE_SPACE }
     val agentTts: Flow<Boolean> = ds.data.catchIO().map { it[KEY_AGENT_TTS] ?: true }
+    val boosterAuto: Flow<Boolean> = ds.data.catchIO().map { it[KEY_BOOSTER_AUTO] ?: false }
+    val boosterInterval: Flow<Int> = ds.data.catchIO().map { it[KEY_BOOSTER_INTERVAL] ?: 3 }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }
@@ -133,6 +138,8 @@ class AppPrefs(private val context: Context) {
     suspend fun setHfToken(v: String) = ds.edit { it[KEY_HF_TOKEN] = v.trim() }
     suspend fun setHfVoiceSpace(v: String) = ds.edit { it[KEY_HF_VOICE_SPACE] = v.trim().trimEnd('/') }
     suspend fun setAgentTts(v: Boolean) = ds.edit { it[KEY_AGENT_TTS] = v }
+    suspend fun setBoosterAuto(v: Boolean) = ds.edit { it[KEY_BOOSTER_AUTO] = v }
+    suspend fun setBoosterInterval(v: Int) = ds.edit { it[KEY_BOOSTER_INTERVAL] = v }
 }
 
 private fun Flow<Preferences>.catchIO() = catch { e ->
