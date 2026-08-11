@@ -27,6 +27,7 @@ import com.trellis.studio.data.db.AppDatabase
 import com.trellis.studio.data.entity.GenerationEntity
 import com.trellis.studio.data.prefs.AppPrefs
 import com.trellis.studio.network.FalImageClient
+import com.trellis.studio.network.HfImageEditClient
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.util.FileExport
 import kotlinx.coroutines.Dispatchers
@@ -203,8 +204,21 @@ fun ImageViewerScreen(
                 editing = true
                 scope.launch {
                     val prefs = AppPrefs(context)
+                    val outDir = FileExport.outputDir(context)
+                    // Free editing first: a Hugging Face FLUX.1-Kontext Space edits
+                    // the real uploaded image at no cost. If it can't (busy/quota)
+                    // and a fal.ai key is set, fall back to fal. This is what turns
+                    // the old hard "needs a fal.ai key" error into a working edit.
+                    val hfToken = prefs.hfToken.first()
                     val falKey = prefs.falKey.first()
-                    FalImageClient().edit(falKey, file, prompt, FileExport.outputDir(context))
+                    val editResult = HfImageEditClient()
+                        .edit(HfImageEditClient.DEFAULT_EDIT_SPACE, hfToken, file, prompt, outDir)
+                        .recoverCatching { hfErr ->
+                            if (falKey.isNotBlank())
+                                FalImageClient().edit(falKey, file, prompt, outDir).getOrThrow()
+                            else throw hfErr
+                        }
+                    editResult
                         .onSuccess { out ->
                             val name = "$title · edited"
                             runCatching {

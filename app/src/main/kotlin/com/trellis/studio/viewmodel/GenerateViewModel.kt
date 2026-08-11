@@ -17,8 +17,11 @@ data class GenerateUiState(
     // Image tab
     val imagePrompt: String = "",
     val negativePrompt: String = "",
-    val imageWidth: Int = 1024,
-    val imageHeight: Int = 1024,
+    // 1344 is the highest resolution NVIDIA FLUX.1 accepts (verified: it allows
+    // 768…1344 and rejects more), so it's the sharpest native image the free/NIM
+    // models can make. True 8K would need an upscaler, which isn't available free.
+    val imageWidth: Int = 1344,
+    val imageHeight: Int = 1344,
     val imageSeed: Long = 0L,
     val selectedImageModelId: String = AppPrefs.DEFAULT_IMG,
     val isGeneratingImage: Boolean = false,

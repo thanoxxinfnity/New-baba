@@ -63,10 +63,19 @@ fun SettingsScreen(
                     onSave = vm::setNvidiaKey,
                 )
                 ApiKeyField(
+                    label = "Hugging Face token",
+                    value = hfToken,
+                    hint = "hf_…",
+                    description = "Free at huggingface.co/settings/tokens (read scope). Powers " +
+                        "free image editing (FLUX Kontext) and accented voice cloning.",
+                    onSave = vm::setHfToken,
+                )
+                ApiKeyField(
                     label = "fal.ai API Key",
                     value = falKey,
                     hint = "key_id:key_secret",
-                    description = "Optional — used for fal.ai TRELLIS 3D generation.",
+                    description = "Optional — a paid fallback for image editing if the free " +
+                        "Hugging Face editor is busy.",
                     onSave = vm::setFalKey,
                 )
                 ApiKeyField(

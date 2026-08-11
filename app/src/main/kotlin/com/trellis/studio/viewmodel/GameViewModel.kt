@@ -184,13 +184,19 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         val modelLines = resInputs.map { (input, resName) -> "- $resName.glb : ${input.role}" }
 
         _status.value = "Writing & checking the game code… (up to ~2 min)"
-        // If the AI can't produce usable code (model down, network drop), fall
-        // back to a hand-written, Godot-verified game so a real, runnable zip is
-        // ALWAYS produced. The user's models still get used — the fallback
-        // auto-discovers whatever is in res://models/.
-        val code = director.write(apiKey, model, idea, modelLines).getOrElse { err ->
-            _message.value = "Used a ready-made playable game (the AI code step " +
-                "didn't come through: ${err.message ?: "unknown"})."
+        // Write the REAL game the user described. Try twice — a first failure is
+        // usually a transient model hiccup, and getting the real game (not the
+        // canned fallback) is what stops games feeling "fake". Only if both tries
+        // fail do we drop in the hand-written, Godot-verified fallback so a
+        // runnable zip is still produced (it reuses whatever models were made).
+        var writeResult = director.write(apiKey, model, idea, modelLines)
+        if (writeResult.isFailure) {
+            _status.value = "Retrying the game code…"
+            writeResult = director.write(apiKey, model, idea, modelLines)
+        }
+        val code = writeResult.getOrElse { err ->
+            _message.value = "Used a ready-made playable game — the AI code step " +
+                "failed twice (${err.message ?: "unknown"}). Check your NVIDIA key in Settings."
             GameForge.FALLBACK_GAME
         }
 
