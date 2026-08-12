@@ -130,7 +130,20 @@ val drawerEntries = listOf(
     DrawerEntry("magic8", "Magic 8-Ball", Icons.Filled.Casino, "Ask for wisdom", "Tools"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
-) + AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.AutoAwesome, it.subtitle, "AI Tools") }
+) + AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.AutoAwesome, it.subtitle, "AI Tools") } +
+    DEV_AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.Code, it.subtitle, "Dev Tools") } +
+    listOf(
+        DrawerEntry("json", "JSON Formatter", Icons.Filled.Code, "Pretty-print & validate", "Dev Tools"),
+        DrawerEntry("jwt", "JWT Decoder", Icons.Filled.Key, "Decode header & payload", "Dev Tools"),
+        DrawerEntry("uuid", "UUID Generator", Icons.Filled.Fingerprint, "Random v4 IDs", "Dev Tools"),
+        DrawerEntry("timestamp", "Timestamp", Icons.Filled.Schedule, "Epoch ⇄ date", "Dev Tools"),
+        DrawerEntry("baseconv", "Base Converter", Icons.Filled.Numbers, "Bin/Oct/Dec/Hex", "Dev Tools"),
+        DrawerEntry("caseconv", "Case Converter", Icons.Filled.TextFields, "camelCase, snake_case…", "Dev Tools"),
+        DrawerEntry("regextest", "Regex Tester", Icons.Filled.Search, "Live match testing", "Dev Tools"),
+        DrawerEntry("colorconv", "Color Converter", Icons.Filled.Palette, "HEX/RGB/HSL", "Dev Tools"),
+        DrawerEntry("diff", "Diff Checker", Icons.Filled.List, "Compare two texts", "Dev Tools"),
+        DrawerEntry("lorem", "Lorem Ipsum", Icons.Filled.Article, "Placeholder text", "Dev Tools"),
+    )
 
 const val ROUTE_VIEWER = "viewer"
 const val ROUTE_IMAGE = "image"
@@ -337,6 +350,19 @@ fun MainContent() {
                     AI_TOOLS.forEach { spec ->
                         composable(spec.key) { AiToolScreen(spec, onMenu = openDrawer) }
                     }
+                    DEV_AI_TOOLS.forEach { spec ->
+                        composable(spec.key) { AiToolScreen(spec, onMenu = openDrawer) }
+                    }
+                    composable("json") { JsonFormatterScreen(onMenu = openDrawer) }
+                    composable("jwt") { JwtDecoderScreen(onMenu = openDrawer) }
+                    composable("uuid") { UuidScreen(onMenu = openDrawer) }
+                    composable("timestamp") { TimestampScreen(onMenu = openDrawer) }
+                    composable("baseconv") { BaseConverterScreen(onMenu = openDrawer) }
+                    composable("caseconv") { CaseConverterScreen(onMenu = openDrawer) }
+                    composable("regextest") { RegexTesterScreen(onMenu = openDrawer) }
+                    composable("colorconv") { ColorConverterScreen(onMenu = openDrawer) }
+                    composable("diff") { DiffScreen(onMenu = openDrawer) }
+                    composable("lorem") { LoremScreen(onMenu = openDrawer) }
                     composable(NavRoute.Personas.route) {
                         PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
                     }
