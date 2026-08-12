@@ -62,6 +62,7 @@ class AppPrefs(private val context: Context) {
         // inbox is never lost, and you can keep as many as you make.
         val KEY_TEMP_MAILS       = stringPreferencesKey("temp_mails")
         val KEY_QUICK_NOTES      = stringPreferencesKey("quick_notes")
+        val KEY_CODE_FOLDER      = stringPreferencesKey("code_folder_uri")
         // A public XTTS voice-clone Space, verified live to clone in Hindi/Indian
         // accent from an uploaded sample. It runs on CPU (no ZeroGPU daily quota),
         // so it stays reliable where a shared GPU Space fails once quota runs out —
@@ -119,6 +120,8 @@ class AppPrefs(private val context: Context) {
     val tempMails: Flow<String> = ds.data.catchIO().map { it[KEY_TEMP_MAILS] ?: "" }
     val quickNotes: Flow<String> = ds.data.catchIO().map { it[KEY_QUICK_NOTES] ?: "" }
     suspend fun setQuickNotes(v: String) = ds.edit { it[KEY_QUICK_NOTES] = v }
+    val codeFolder: Flow<String> = ds.data.catchIO().map { it[KEY_CODE_FOLDER] ?: "" }
+    suspend fun setCodeFolder(v: String) = ds.edit { it[KEY_CODE_FOLDER] = v }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }

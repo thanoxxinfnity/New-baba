@@ -133,6 +133,7 @@ val drawerEntries = listOf(
 ) + AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.AutoAwesome, it.subtitle, "AI Tools") } +
     DEV_AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.Code, it.subtitle, "Dev Tools") } +
     listOf(
+        DrawerEntry("files", "Code Folder", Icons.Filled.FolderOpen, "Edit files + run AI on them", "Dev Tools"),
         DrawerEntry("json", "JSON Formatter", Icons.Filled.Code, "Pretty-print & validate", "Dev Tools"),
         DrawerEntry("jwt", "JWT Decoder", Icons.Filled.Key, "Decode header & payload", "Dev Tools"),
         DrawerEntry("uuid", "UUID Generator", Icons.Filled.Fingerprint, "Random v4 IDs", "Dev Tools"),
@@ -353,6 +354,7 @@ fun MainContent() {
                     DEV_AI_TOOLS.forEach { spec ->
                         composable(spec.key) { AiToolScreen(spec, onMenu = openDrawer) }
                     }
+                    composable("files") { FilesScreen(onMenu = openDrawer) }
                     composable("json") { JsonFormatterScreen(onMenu = openDrawer) }
                     composable("jwt") { JwtDecoderScreen(onMenu = openDrawer) }
                     composable("uuid") { UuidScreen(onMenu = openDrawer) }
