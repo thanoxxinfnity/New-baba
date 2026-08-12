@@ -130,7 +130,7 @@ val drawerEntries = listOf(
     DrawerEntry("magic8", "Magic 8-Ball", Icons.Filled.Casino, "Ask for wisdom", "Tools"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
-)
+) + AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.AutoAwesome, it.subtitle, "AI Tools") }
 
 const val ROUTE_VIEWER = "viewer"
 const val ROUTE_IMAGE = "image"
@@ -334,6 +334,9 @@ fun MainContent() {
                     composable("breathe") { BreathingScreen(onMenu = openDrawer) }
                     composable("tictactoe") { TicTacToeScreen(onMenu = openDrawer) }
                     composable("magic8") { Magic8BallScreen(onMenu = openDrawer) }
+                    AI_TOOLS.forEach { spec ->
+                        composable(spec.key) { AiToolScreen(spec, onMenu = openDrawer) }
+                    }
                     composable(NavRoute.Personas.route) {
                         PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
                     }
