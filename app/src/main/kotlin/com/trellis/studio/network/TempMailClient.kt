@@ -43,32 +43,40 @@ class TempMailClient {
         val seen: Boolean,
     )
 
-    /** Creates a fresh random disposable address and returns its credentials. */
-    suspend fun create(): Result<Account> = withContext(Dispatchers.IO) {
+    /** Available domains you can build an address on. */
+    suspend fun domains(): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
-            val domain = firstDomain()
-            val local = "void" + (100000..999999).random() + System.currentTimeMillis().toString().takeLast(4)
-            val address = "$local@$domain"
+            val req = Request.Builder().url("$base/domains").header("Accept", "application/json").get().build()
+            client.newCall(req).execute().use { resp ->
+                val txt = resp.body?.string().orEmpty()
+                val el = json.parseToJsonElement(txt)
+                val list = runCatching { el.jsonObject["hydra:member"]!!.jsonArray }.getOrElse { el.jsonArray }
+                list.mapNotNull { it.jsonObject["domain"]?.jsonPrimitive?.content }
+                    .ifEmpty { throw Exception("No mail domains available right now.") }
+            }
+        }
+    }
+
+    /**
+     * Creates a disposable address. Give [localPart] to choose your own name
+     * (e.g. "tejas.cool"); leave it null for a random one. [domain] picks the
+     * domain, or the first available one is used.
+     */
+    suspend fun create(localPart: String? = null, domain: String? = null): Result<Account> = withContext(Dispatchers.IO) {
+        runCatching {
+            val dom = domain ?: domains().getOrThrow().first()
+            val local = (localPart?.trim()?.lowercase()?.replace(Regex("[^a-z0-9._-]"), "")?.takeIf { it.isNotBlank() }
+                ?: ("void" + (100000..999999).random() + System.currentTimeMillis().toString().takeLast(4)))
+            val address = "$local@$dom"
             val password = "Void!" + (100000..999999).random()
             val body = buildJsonObject { put("address", address); put("password", password) }
                 .toString().toRequestBody(jsonMedia)
             val req = Request.Builder().url("$base/accounts").post(body).build()
             client.newCall(req).execute().use { resp ->
-                if (resp.code == 422) throw Exception("That address is taken — try again.")
+                if (resp.code == 422) throw Exception("\"$local\" is taken or invalid — try another name.")
                 if (!resp.isSuccessful) throw Exception("Couldn't create an inbox (${resp.code}). Try again.")
             }
             Account(address, password)
-        }
-    }
-
-    private fun firstDomain(): String {
-        val req = Request.Builder().url("$base/domains").header("Accept", "application/json").get().build()
-        client.newCall(req).execute().use { resp ->
-            val txt = resp.body?.string().orEmpty()
-            val el = json.parseToJsonElement(txt)
-            val list = runCatching { el.jsonObject["hydra:member"]!!.jsonArray }.getOrElse { el.jsonArray }
-            return list.firstOrNull()?.jsonObject?.get("domain")?.jsonPrimitive?.content
-                ?: throw Exception("No mail domains available right now.")
         }
     }
 
@@ -109,7 +117,11 @@ class TempMailClient {
         }
     }
 
-    /** Fetches the full text of one message. */
+    /**
+     * Fetches one message as a ready-to-render HTML document (dark themed, links
+     * clickable). If the mail has no HTML part, its plain text is wrapped so URLs
+     * still become tappable links.
+     */
     suspend fun read(acc: Account, id: String): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val tok = token(acc)
@@ -119,12 +131,31 @@ class TempMailClient {
                 val txt = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) throw Exception("Couldn't open the message (${resp.code}).")
                 val o = json.parseToJsonElement(txt).jsonObject
-                o["text"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                    ?: o["html"]?.jsonArray?.joinToString("\n") { it.jsonPrimitive.content }
-                        ?.replace(Regex("<[^>]+>"), " ")?.replace(Regex("\\s+"), " ")?.trim()
-                    ?: o["intro"]?.jsonPrimitive?.content
-                    ?: "(empty message)"
+                val html = o["html"]?.jsonArray?.joinToString("\n") { it.jsonPrimitive.content }?.takeIf { it.isNotBlank() }
+                val body = html ?: linkify(
+                    o["text"]?.jsonPrimitive?.content
+                        ?: o["intro"]?.jsonPrimitive?.content
+                        ?: "(empty message)"
+                )
+                wrap(body)
             }
         }
     }
+
+    /** Turns bare URLs in plain text into clickable anchors, escaping the rest. */
+    private fun linkify(text: String): String {
+        val esc = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return "<pre style=\"white-space:pre-wrap;word-break:break-word\">" +
+            esc.replace(Regex("(https?://[^\\s<]+)")) { "<a href=\"${it.value}\">${it.value}</a>" } +
+            "</pre>"
+    }
+
+    private fun wrap(inner: String): String = """
+        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body{background:#0B0B12;color:#E8E8F0;font-family:sans-serif;padding:16px;font-size:15px;line-height:1.5}
+          a{color:#38BDF8;word-break:break-word} img{max-width:100%;height:auto}
+          pre{font-family:sans-serif}
+        </style></head><body>$inner</body></html>
+    """.trimIndent()
 }

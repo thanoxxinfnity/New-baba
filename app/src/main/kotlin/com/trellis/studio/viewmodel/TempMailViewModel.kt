@@ -19,6 +19,7 @@ class TempMailViewModel(app: Application) : AndroidViewModel(app) {
         val selected: TempMailClient.Account? = null,
         val inbox: List<TempMailClient.Message> = emptyList(),
         val openBody: String? = null,
+        val domains: List<String> = emptyList(),
         val creating: Boolean = false,
         val loading: Boolean = false,
         val status: String? = null,
@@ -29,6 +30,9 @@ class TempMailViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<State> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            client.domains().onSuccess { d -> _state.update { it.copy(domains = d) } }
+        }
         viewModelScope.launch {
             prefs.tempMails.collect { raw ->
                 val accts = raw.lineSequence().filter { it.isNotBlank() }.mapNotNull { line ->
@@ -43,11 +47,11 @@ class TempMailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun generate() {
+    fun generate(customName: String? = null, domain: String? = null) {
         if (_state.value.creating) return
         viewModelScope.launch {
             _state.update { it.copy(creating = true, error = null, status = "Creating a new inbox…") }
-            client.create()
+            client.create(customName, domain ?: _state.value.domains.firstOrNull())
                 .onSuccess { acc ->
                     prefs.addTempMail(acc.address, acc.password)
                     _state.update { it.copy(creating = false, status = null, selected = acc, inbox = emptyList(), openBody = null) }
