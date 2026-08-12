@@ -35,6 +35,7 @@ import com.trellis.studio.util.GameBooster
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -217,18 +218,24 @@ fun FlashlightScreen(onMenu: () -> Unit = {}) {
 @Composable
 fun ShakeBoostScreen(onMenu: () -> Unit = {}) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val acc = sensorValues(Sensor.TYPE_ACCELEROMETER)
     var lastBoost by remember { mutableLongStateOf(0L) }
     var freed by remember { mutableStateOf<Long?>(null) }
     var shakes by remember { mutableIntStateOf(0) }
+    var boosting by remember { mutableStateOf(false) }
 
+    // Detect the shake here, but run the boost on the screen's own scope so a
+    // new accelerometer reading (which happens many times a second and restarts
+    // this effect) can't cancel a boost half-way through.
     LaunchedEffect(acc) {
-        acc?.let {
-            val g = sqrt(it[0] * it[0] + it[1] * it[1] + it[2] * it[2]) / SensorManager.GRAVITY_EARTH
-            if (g > 2.2f && System.currentTimeMillis() - lastBoost > 2500) {
-                lastBoost = System.currentTimeMillis(); shakes++
+        val a = acc ?: return@LaunchedEffect
+        val g = sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) / SensorManager.GRAVITY_EARTH
+        if (g > 2.2f && !boosting && System.currentTimeMillis() - lastBoost > 2500) {
+            lastBoost = System.currentTimeMillis(); shakes++; boosting = true
+            scope.launch {
                 val r = withContext(Dispatchers.Default) { GameBooster.boost(context) }
-                freed = r.freedMb
+                freed = r.freedMb; boosting = false
             }
         }
     }

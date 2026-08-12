@@ -260,7 +260,7 @@ fun SettingsScreen(
                 Column {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Temperature", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                        Text(String.format("%.2f", temperature), style = MaterialTheme.typography.bodyMedium, color = Purple60)
+                        Text(String.format(java.util.Locale.US, "%.2f", temperature), style = MaterialTheme.typography.bodyMedium, color = Purple60)
                     }
                     Slider(
                         value = temperature,

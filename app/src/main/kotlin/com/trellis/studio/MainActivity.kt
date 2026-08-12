@@ -118,6 +118,16 @@ val drawerEntries = listOf(
     DrawerEntry("screentest", "Screen Test", Icons.Filled.Smartphone, "Check for dead pixels", "Tools"),
     DrawerEntry("tempmail", "Temp Inbox", Icons.Filled.AlternateEmail, "Throwaway email, keep yours private", "Tools"),
     DrawerEntry("fakecall", "Fake Call", Icons.Filled.Call, "Prank a friend with a fake call", "Tools"),
+    DrawerEntry("calculator", "Calculator", Icons.Filled.Calculate, "Quick math", "Tools"),
+    DrawerEntry("quicknotes", "Quick Notes", Icons.Filled.EditNote, "Auto-saved scratchpad", "Tools"),
+    DrawerEntry("texttools", "Text Tools", Icons.Filled.TextFields, "Count & transform text", "Tools"),
+    DrawerEntry("devtools", "Dev Tools", Icons.Filled.Code, "Base64, hash, URL encode", "Tools"),
+    DrawerEntry("agecalc", "Age Calculator", Icons.Filled.Cake, "How old are you exactly", "Tools"),
+    DrawerEntry("metronome", "Metronome", Icons.Filled.MusicNote, "Keep the beat", "Tools"),
+    DrawerEntry("whiteboard", "Whiteboard", Icons.Filled.Brush, "Doodle & sketch", "Tools"),
+    DrawerEntry("breathe", "Breathe", Icons.Filled.SelfImprovement, "Calm-down breathing", "Tools"),
+    DrawerEntry("tictactoe", "Tic-Tac-Toe", Icons.Filled.GridOn, "Two-player game", "Tools"),
+    DrawerEntry("magic8", "Magic 8-Ball", Icons.Filled.Casino, "Ask for wisdom", "Tools"),
 
     DrawerEntry("settings", "Settings", Icons.Filled.Settings, "Keys, models, build server", "System"),
 )
@@ -314,6 +324,16 @@ fun MainContent() {
                     composable("screentest") { ScreenTestScreen(onMenu = openDrawer) }
                     composable("tempmail") { TempMailScreen(onMenu = openDrawer) }
                     composable("fakecall") { FakeCallScreen(onMenu = openDrawer) }
+                    composable("calculator") { CalculatorScreen(onMenu = openDrawer) }
+                    composable("quicknotes") { QuickNotesScreen(onMenu = openDrawer) }
+                    composable("texttools") { TextToolsScreen(onMenu = openDrawer) }
+                    composable("devtools") { DevToolsScreen(onMenu = openDrawer) }
+                    composable("agecalc") { AgeCalculatorScreen(onMenu = openDrawer) }
+                    composable("metronome") { MetronomeScreen(onMenu = openDrawer) }
+                    composable("whiteboard") { WhiteboardScreen(onMenu = openDrawer) }
+                    composable("breathe") { BreathingScreen(onMenu = openDrawer) }
+                    composable("tictactoe") { TicTacToeScreen(onMenu = openDrawer) }
+                    composable("magic8") { Magic8BallScreen(onMenu = openDrawer) }
                     composable(NavRoute.Personas.route) {
                         PersonasScreen(onMenu = openDrawer, onOpenChat = { go(NavRoute.Chat.route) })
                     }

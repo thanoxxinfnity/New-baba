@@ -193,7 +193,7 @@ fun ImageViewerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        String.format("%.1f×", scale),
+                        String.format(java.util.Locale.US, "%.1f×", scale),
                         style = MaterialTheme.typography.labelLarge,
                         color = Cyan,
                     )
