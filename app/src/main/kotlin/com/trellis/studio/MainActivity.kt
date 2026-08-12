@@ -117,6 +117,7 @@ val drawerEntries = listOf(
     DrawerEntry("charging", "Charging Display", Icons.Filled.BatteryChargingFull, "Bedside battery screen", "Tools"),
     DrawerEntry("screentest", "Screen Test", Icons.Filled.Smartphone, "Check for dead pixels", "Tools"),
     DrawerEntry("tempmail", "Temp Inbox", Icons.Filled.AlternateEmail, "Throwaway email, keep yours private", "Tools"),
+    DrawerEntry("vault", "Vault", Icons.Filled.Lock, "Encrypted locker for your passwords", "Tools"),
     DrawerEntry("fakecall", "Fake Call", Icons.Filled.Call, "Prank a friend with a fake call", "Tools"),
     DrawerEntry("calculator", "Calculator", Icons.Filled.Calculate, "Quick math", "Tools"),
     DrawerEntry("quicknotes", "Quick Notes", Icons.Filled.EditNote, "Auto-saved scratchpad", "Tools"),
@@ -338,6 +339,7 @@ fun MainContent() {
                     composable("screentest") { ScreenTestScreen(onMenu = openDrawer) }
                     composable("tempmail") { TempMailScreen(onMenu = openDrawer) }
                     composable("fakecall") { FakeCallScreen(onMenu = openDrawer) }
+                    composable("vault") { VaultScreen(onMenu = openDrawer) }
                     composable("calculator") { CalculatorScreen(onMenu = openDrawer) }
                     composable("quicknotes") { QuickNotesScreen(onMenu = openDrawer) }
                     composable("texttools") { TextToolsScreen(onMenu = openDrawer) }
