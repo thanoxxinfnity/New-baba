@@ -68,6 +68,7 @@ class AppPrefs(private val context: Context) {
         val KEY_VAULT_SALT       = stringPreferencesKey("vault_salt")
         val KEY_VAULT_CHECK      = stringPreferencesKey("vault_check")
         val KEY_VAULT_BLOB       = stringPreferencesKey("vault_blob")
+        val KEY_API_HISTORY      = stringPreferencesKey("api_history")
         // A public XTTS voice-clone Space, verified live to clone in Hindi/Indian
         // accent from an uploaded sample. It runs on CPU (no ZeroGPU daily quota),
         // so it stays reliable where a shared GPU Space fails once quota runs out —
@@ -132,6 +133,8 @@ class AppPrefs(private val context: Context) {
     val vaultBlob: Flow<String> = ds.data.catchIO().map { it[KEY_VAULT_BLOB] ?: "" }
     suspend fun setVault(salt: String, check: String) = ds.edit { it[KEY_VAULT_SALT] = salt; it[KEY_VAULT_CHECK] = check }
     suspend fun setVaultBlob(v: String) = ds.edit { it[KEY_VAULT_BLOB] = v }
+    val apiHistory: Flow<String> = ds.data.catchIO().map { it[KEY_API_HISTORY] ?: "" }
+    suspend fun setApiHistory(v: String) = ds.edit { it[KEY_API_HISTORY] = v }
 
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }

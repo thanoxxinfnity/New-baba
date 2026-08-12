@@ -135,6 +135,7 @@ val drawerEntries = listOf(
     DEV_AI_TOOLS.map { DrawerEntry(it.key, it.title, Icons.Filled.Code, it.subtitle, "Dev Tools") } +
     listOf(
         DrawerEntry("files", "Code Folder", Icons.Filled.FolderOpen, "Edit files + run AI on them", "Dev Tools"),
+        DrawerEntry("apitester", "API Tester", Icons.Filled.Send, "REST client — test any endpoint", "Dev Tools"),
         DrawerEntry("json", "JSON Formatter", Icons.Filled.Code, "Pretty-print & validate", "Dev Tools"),
         DrawerEntry("jwt", "JWT Decoder", Icons.Filled.Key, "Decode header & payload", "Dev Tools"),
         DrawerEntry("uuid", "UUID Generator", Icons.Filled.Fingerprint, "Random v4 IDs", "Dev Tools"),
@@ -357,6 +358,7 @@ fun MainContent() {
                         composable(spec.key) { AiToolScreen(spec, onMenu = openDrawer) }
                     }
                     composable("files") { FilesScreen(onMenu = openDrawer) }
+                    composable("apitester") { ApiTesterScreen(onMenu = openDrawer) }
                     composable("json") { JsonFormatterScreen(onMenu = openDrawer) }
                     composable("jwt") { JwtDecoderScreen(onMenu = openDrawer) }
                     composable("uuid") { UuidScreen(onMenu = openDrawer) }
