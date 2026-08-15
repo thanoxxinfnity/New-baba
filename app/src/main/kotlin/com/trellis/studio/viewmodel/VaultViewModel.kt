@@ -101,6 +101,13 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(unlocked = false, items = emptyList(), error = null) }
     }
 
+    /** Erases the vault entirely so a new PIN can be set. Wipes all saved secrets. */
+    fun reset() {
+        key = null
+        viewModelScope.launch { prefs.setVault("", ""); prefs.setVaultBlob("") }
+        _state.update { State(hasVault = false) }
+    }
+
     fun clearError() = _state.update { it.copy(error = null) }
 
     private fun toJson(list: List<Item>): String {

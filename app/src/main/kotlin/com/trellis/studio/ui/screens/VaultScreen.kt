@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -13,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +31,7 @@ import com.trellis.studio.viewmodel.VaultViewModel
 fun VaultScreen(vm: VaultViewModel = viewModel(), onMenu: () -> Unit = {}) {
     val s by vm.state.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
+    var showReset by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         Surface(color = SurfDark) {
@@ -45,55 +48,99 @@ fun VaultScreen(vm: VaultViewModel = viewModel(), onMenu: () -> Unit = {}) {
 
         when {
             !s.hasVault -> SetupPane(s.busy, s.error) { vm.createMaster(it) }
-            !s.unlocked -> UnlockPane(s.busy, s.error) { vm.unlock(it) }
+            !s.unlocked -> UnlockPane(s.busy, s.error, onUnlock = { vm.unlock(it) }, onReset = { showReset = true })
             else -> UnlockedPane(vm, s, onAdd = { showAdd = true })
         }
     }
 
     if (showAdd) AddDialog(onDismiss = { showAdd = false }, onSave = { t, sec, n -> vm.add(t, sec, n); showAdd = false })
+    if (showReset) AlertDialog(
+        onDismissRequest = { showReset = false },
+        confirmButton = { TextButton(onClick = { vm.reset(); showReset = false }) { Text("Erase & reset", color = Pink) } },
+        dismissButton = { TextButton(onClick = { showReset = false }) { Text("Cancel") } },
+        title = { Text("Reset vault?", color = TextPrimary) },
+        text = { Text("This erases the vault and everything saved in it, so you can set a new PIN. " +
+            "This can't be undone.", color = TextSecondary) },
+        containerColor = CardDark,
+    )
 }
 
 @Composable
 private fun SetupPane(busy: Boolean, error: String?, onCreate: (String) -> Unit) {
-    var pw by remember { mutableStateOf("") }
-    var pw2 by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Icon(Icons.Default.Shield, null, tint = Cyan, modifier = Modifier.size(48.dp).align(Alignment.CenterHorizontally))
-        Text("Create a master password", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-        Text("This one password unlocks your vault. It's never stored — remember it, " +
-            "because it can't be recovered.", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-        pwField(pw, "Master password") { pw = it }
-        pwField(pw2, "Confirm password") { pw2 = it }
-        error?.let { Text(it, color = Pink, style = MaterialTheme.typography.bodySmall) }
-        Button(onClick = { if (pw == pw2) onCreate(pw) },
-            enabled = !busy && pw.isNotBlank() && pw == pw2,
-            colors = ButtonDefaults.buttonColors(containerColor = Purple40), shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth()) {
-            if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = TextPrimary, strokeWidth = 2.dp)
-            else Text("Create vault", fontWeight = FontWeight.Bold)
-        }
-        if (pw.isNotBlank() && pw2.isNotBlank() && pw != pw2)
-            Text("Passwords don't match", color = Pink, style = MaterialTheme.typography.labelSmall)
-    }
+    var first by remember { mutableStateOf<String?>(null) }
+    var pin by remember { mutableStateOf("") }
+    var mismatch by remember { mutableStateOf(false) }
+    LockPad(
+        title = if (first == null) "Set a PIN" else "Confirm your PIN",
+        subtitle = if (first == null) "This unlocks your vault. It's never stored — remember it."
+        else "Enter the same PIN again",
+        pin = pin, onPin = { pin = it; mismatch = false }, busy = busy,
+        error = if (mismatch) "PINs don't match — try again" else error,
+        onSubmit = {
+            if (pin.length < 4) return@LockPad
+            if (first == null) { first = pin; pin = "" }
+            else if (pin == first) onCreate(pin)
+            else { mismatch = true; pin = ""; first = null }
+        },
+    )
 }
 
 @Composable
-private fun UnlockPane(busy: Boolean, error: String?, onUnlock: (String) -> Unit) {
-    var pw by remember { mutableStateOf("") }
+private fun UnlockPane(busy: Boolean, error: String?, onUnlock: (String) -> Unit, onReset: () -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    Box(Modifier.fillMaxSize()) {
+        LockPad(
+            title = "Enter your PIN", subtitle = "Unlock your vault",
+            pin = pin, onPin = { pin = it }, busy = busy, error = error,
+            onSubmit = { if (pin.length >= 4) onUnlock(pin) },
+        )
+        TextButton(onClick = onReset, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)) {
+            Text("Forgot PIN? Reset vault", color = TextDisabled, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+/** A lock-screen-style PIN pad: dots + a numeric keypad. */
+@Composable
+private fun LockPad(
+    title: String, subtitle: String, pin: String, onPin: (String) -> Unit,
+    busy: Boolean, error: String?, onSubmit: () -> Unit,
+) {
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
-        Icon(Icons.Default.Lock, null, tint = Cyan, modifier = Modifier.size(56.dp))
-        Spacer(Modifier.height(16.dp))
-        Text("Enter master password", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+        Icon(Icons.Default.Lock, null, tint = Cyan, modifier = Modifier.size(44.dp))
         Spacer(Modifier.height(14.dp))
-        pwField(pw, "Master password") { pw = it }
-        error?.let { Text(it, color = Pink, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) }
-        Spacer(Modifier.height(14.dp))
-        Button(onClick = { onUnlock(pw) }, enabled = !busy && pw.isNotBlank(),
-            colors = ButtonDefaults.buttonColors(containerColor = Purple40), shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth()) {
-            if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = TextPrimary, strokeWidth = 2.dp)
-            else { Icon(Icons.Default.LockOpen, null); Spacer(Modifier.width(8.dp)); Text("Unlock", fontWeight = FontWeight.Bold) }
+        Text(title, color = TextPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(subtitle, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(24.dp))
+        // dots
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            repeat(8) { i ->
+                Box(Modifier.size(14.dp).clip(CircleShape).background(if (i < pin.length) Cyan else CardHigh))
+            }
+        }
+        error?.let { Text(it, color = Pink, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 12.dp)) }
+        Spacer(Modifier.height(28.dp))
+        // keypad
+        val rows = listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("⌫", "0", "✓"))
+        rows.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+                row.forEach { k ->
+                    Box(Modifier.size(72.dp).clip(CircleShape)
+                        .background(if (k == "✓") Purple40 else CardDark)
+                        .clickable(enabled = !busy) {
+                            when (k) {
+                                "⌫" -> if (pin.isNotEmpty()) onPin(pin.dropLast(1))
+                                "✓" -> onSubmit()
+                                else -> if (pin.length < 8) onPin(pin + k)
+                            }
+                        }, contentAlignment = Alignment.Center) {
+                        if (k == "✓" && busy) CircularProgressIndicator(Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        else Text(k, color = if (k == "✓") Color.White else TextPrimary,
+                            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
@@ -175,15 +222,3 @@ private fun AddDialog(onDismiss: () -> Unit, onSave: (String, String, String) ->
     )
 }
 
-@Composable
-private fun pwField(value: String, label: String, onChange: (String) -> Unit) {
-    var visible by remember { mutableStateOf(false) }
-    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label, color = TextSecondary) },
-        singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = { visible = !visible }) {
-                Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-            }
-        })
-}
