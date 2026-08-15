@@ -88,6 +88,7 @@ val drawerEntries = listOf(
     DrawerEntry("stats", "Your Stats", Icons.Filled.EmojiEvents, "Creations, streaks and badges", "Workspace"),
     DrawerEntry("device", "Device", Icons.Filled.Memory, "Live RAM, battery, storage", "Developer"),
     DrawerEntry("video", "Video Studio", Icons.Filled.Movie, "Text → a real video, scene by scene", "Workspace"),
+    DrawerEntry("aivideo", "AI Video", Icons.Filled.Movie, "Text/image → real AI video (free)", "Workspace"),
     DrawerEntry("voice", "Voice", Icons.Filled.GraphicEq, "NVIDIA cloud TTS and voice cloning", "Workspace"),
     DrawerEntry("livevoice", "Live Voice", Icons.Filled.RecordVoiceOver, "Talk to the AI out loud, in your voice", "Workspace"),
 
@@ -313,6 +314,7 @@ fun MainContent() {
                         )
                     }
                     composable(NavRoute.Video.route) { VideoScreen(onMenu = openDrawer) }
+                    composable("aivideo") { AiVideoScreen(onMenu = openDrawer) }
                     composable(NavRoute.LiveVoice.route) { LiveVoiceScreen(onMenu = openDrawer) }
                     composable(NavRoute.Booster.route) { BoosterScreen(onMenu = openDrawer) }
                     composable(NavRoute.IdeaLab.route) { IdeaLabScreen(onMenu = openDrawer) }
