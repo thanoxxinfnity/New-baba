@@ -87,7 +87,9 @@ class TrellisRepository(
                     detail?.contains("example_id") == true ->
                         "NVIDIA's free TRELLIS preview endpoint only accepts its own sample " +
                             "images — it cannot process custom photos yet. This is a limit on " +
-                            "NVIDIA's side, not something this app can work around."
+                            "NVIDIA's side, not something this app can work around. Switch to " +
+                            "\"Pollinations TRELLIS\" or \"fal.ai TRELLIS\" in Settings to use " +
+                            "your own photos."
 
                     response.code() == 500 ->
                         "NVIDIA's TRELLIS service returned a server error. Their preview " +

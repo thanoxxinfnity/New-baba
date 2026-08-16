@@ -42,9 +42,25 @@ class ImageRepository(
     /** Copies a gallery [uri] into app storage so it can be re-used and stored in history. */
     suspend fun importFromGallery(uri: Uri): File = withContext(Dispatchers.IO) {
         val file = File(imagesDir, "picked_${System.currentTimeMillis()}.img")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            file.outputStream().use { output -> input.copyTo(output) }
-        } ?: throw AppException.Api("Could not read the selected image.")
+        val stream = try {
+            context.contentResolver.openInputStream(uri)
+        } catch (e: Exception) {
+            throw AppException.Api("Could not read the selected image. Please try picking it again.")
+        } ?: throw AppException.Api("Could not read the selected image. Please try picking it again.")
+
+        try {
+            stream.use { input ->
+                file.outputStream().use { output -> input.copyTo(output) }
+            }
+        } catch (e: Exception) {
+            file.delete()
+            throw AppException.Api("Could not read the selected image. Please try picking it again.")
+        }
+
+        if (file.length() == 0L) {
+            file.delete()
+            throw AppException.Api("The selected image appears to be empty. Please pick a different one.")
+        }
         file
     }
 }
