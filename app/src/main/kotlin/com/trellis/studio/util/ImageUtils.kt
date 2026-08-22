@@ -13,17 +13,13 @@ import java.io.File
 /**
  * Prepares picked photos for upload.
  *
- * A phone camera shot is 3–12 MB, well past what the vision and 3D endpoints
- * accept inline, so pictures were being silently dropped. Everything here
- * downscales and re-compresses first, and runs off the main thread — the old
- * inline copy blocked the UI and could leave a zero-byte file behind.
+ * Strategy: copy the URI to a local temp file first (one stream open), then do
+ * the two-pass decode from the stable file. Virtual URIs (Google Photos, cloud
+ * drives) can fail if opened more than once, causing "Could not open the
+ * selected image." — the copy step eliminates that class of failure entirely.
  */
 object ImageUtils {
 
-    /**
-     * Copies [uri] into cache as a right-way-up JPEG no larger than [maxDimension]
-     * on its long edge and [maxBytes] on disk.
-     */
     suspend fun prepareForUpload(
         context: Context,
         uri: Uri,
@@ -31,12 +27,22 @@ object ImageUtils {
         maxBytes: Int = 700_000,
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            val bitmap = decodeScaled(context, uri, maxDimension)
-                ?: error("That file isn't an image this app can read.")
-            val upright = applyExifRotation(context, uri, bitmap)
+            // Step 1: copy the URI into a local file in one shot.
+            val raw = File(context.cacheDir, "img_raw_${System.currentTimeMillis()}")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                raw.outputStream().use { out -> input.copyTo(out) }
+            } ?: error("Could not open the selected image. Try picking it again.")
 
+            if (!raw.exists() || raw.length() == 0L) error("The selected image appears to be empty.")
+
+            // Step 2: two-pass decode from the stable local file.
+            val bitmap = decodeScaledFromFile(raw, maxDimension)
+                ?: error("That file isn't an image this app can read.")
+            val upright = applyExifRotationFromFile(raw, bitmap)
+            raw.delete()
+
+            // Step 3: re-compress to target size.
             val target = File(context.cacheDir, "upload_${System.currentTimeMillis()}.jpg")
-            // Step the quality down until it fits; 60 still looks fine at this size.
             var quality = 90
             do {
                 target.outputStream().use { out ->
@@ -55,12 +61,9 @@ object ImageUtils {
         }
     }
 
-    /** Two-pass decode so a large photo never has to fit in memory at full size. */
-    private fun decodeScaled(context: Context, uri: Uri, maxDimension: Int): Bitmap? {
+    private fun decodeScaledFromFile(file: File, maxDimension: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
-        } ?: error("Could not open the selected image.")
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
 
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
@@ -73,11 +76,8 @@ object ImageUtils {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val decoded = context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, opts)
-        } ?: return null
+        val decoded = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return null
 
-        // inSampleSize only halves, so trim the remainder to hit the target exactly.
         val longest = maxOf(decoded.width, decoded.height)
         if (longest <= maxDimension) return decoded
         val ratio = maxDimension.toFloat() / longest
@@ -91,15 +91,12 @@ object ImageUtils {
         return scaled
     }
 
-    /** Photos taken in portrait carry rotation in EXIF rather than in the pixels. */
-    private fun applyExifRotation(context: Context, uri: Uri, bitmap: Bitmap): Bitmap {
+    private fun applyExifRotationFromFile(file: File, bitmap: Bitmap): Bitmap {
         val orientation = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                ExifInterface(stream).getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION,
-                    ExifInterface.ORIENTATION_NORMAL,
-                )
-            } ?: ExifInterface.ORIENTATION_NORMAL
+            ExifInterface(file.absolutePath).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
         val matrix = Matrix()
