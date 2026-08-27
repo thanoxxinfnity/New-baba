@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** One queued text-to-3D request. */
 data class ModelJob(
@@ -30,7 +31,6 @@ data class ModelJob(
     val status: Status = Status.QUEUED,
     val attempt: Int = 0,
     val totalAttempts: Int = 0,
-    val rounds: Int = 0,
     val modelPath: String? = null,
     val error: String? = null,
 ) {
@@ -38,14 +38,12 @@ data class ModelJob(
 
     val progressLabel: String
         get() = when (status) {
-            Status.QUEUED -> if (rounds > 0) "Queued again — round ${rounds + 1}" else "Waiting…"
+            Status.QUEUED -> "Waiting in queue…"
             Status.RUNNING -> when {
-                attempt > 1 -> "Server busy — retry $attempt of $totalAttempts"
-                else -> "Generating…"
+                attempt > 1 -> "NVIDIA busy — attempt $attempt of $totalAttempts (max ~90s)"
+                else -> "Contacting NVIDIA 3D service…"
             }
-            Status.DONE -> "Ready"
-            // Kept short on purpose: the card has one line for this, and a long
-            // sentence was being cut off mid-word.
+            Status.DONE -> "Ready — tap to view"
             Status.FAILED -> error ?: "Failed"
         }
 }
@@ -96,7 +94,6 @@ class ModelQueue private constructor(app: Application) {
                         prompt = row.prompt,
                         detail = runCatching { TrellisClient.Detail.valueOf(row.detail) }
                             .getOrDefault(TrellisClient.Detail.STANDARD),
-                        rounds = row.rounds,
                     )
                 }
             }
@@ -151,7 +148,7 @@ class ModelQueue private constructor(app: Application) {
         }
         _jobs.update { list ->
             list.map {
-                if (it.id == id) it.copy(status = ModelJob.Status.QUEUED, rounds = 0, error = null)
+                if (it.id == id) it.copy(status = ModelJob.Status.QUEUED, attempt = 0, error = null)
                 else it
             }
         }
@@ -179,15 +176,21 @@ class ModelQueue private constructor(app: Application) {
                     continue
                 }
 
-                client.generateFromText(
-                    apiKey = apiKey,
-                    prompt = job.prompt,
-                    detail = job.detail,
-                    seed = job.seed,
-                    onAttempt = { attempt, total ->
-                        update(job.id) { it.copy(attempt = attempt, totalAttempts = total) }
-                    },
-                ).onSuccess { path ->
+                // Hard cap: if NVIDIA is down, don't block the queue for 9 minutes.
+                // 100s covers MAX_ATTEMPTS=4 (2 rounds × 45s each) with a margin.
+                val result = withTimeoutOrNull(100_000L) {
+                    client.generateFromText(
+                        apiKey = apiKey,
+                        prompt = job.prompt,
+                        detail = job.detail,
+                        seed = job.seed,
+                        onAttempt = { attempt, total ->
+                            update(job.id) { it.copy(attempt = attempt, totalAttempts = total) }
+                        },
+                    )
+                } ?: Result.failure(Exception("NVIDIA's 3D service timed out — try again later"))
+
+                result.onSuccess { path ->
                     // Measure the model as soon as it lands: what shape it is and
                     // where its limbs are. Doing it here means the rig is built on
                     // measurements by the time the user asks for one, instead of on
@@ -210,31 +213,12 @@ class ModelQueue private constructor(app: Application) {
                         it.copy(status = ModelJob.Status.DONE, modelPath = path, error = null)
                     }
                 }.onFailure { e ->
-                    // The service refuses on capacity, not on the prompt, so a
-                    // whole exhausted round is worth repeating once the rest of
-                    // the queue has had its turn — moving the job to the back
-                    // spreads the load instead of hammering the same request.
-                    val current = _jobs.value.firstOrNull { it.id == job.id }
-                    val nextRound = (current?.rounds ?: 0) + 1
-                    if (nextRound < MAX_ROUNDS) {
-                        _jobs.update { list ->
-                            val retried = list.firstOrNull { it.id == job.id }?.copy(
-                                status = ModelJob.Status.QUEUED,
-                                rounds = nextRound,
-                                attempt = 0,
-                                error = null,
-                            )
-                            if (retried == null) list
-                            else list.filterNot { it.id == job.id } + retried
-                        }
-                        runCatching { db.queueDao().setRounds(job.id, nextRound) }
-                        delay(RETRY_BACKOFF_MS)
-                    } else {
-                        runCatching { db.queueDao().delete(job.id) }
-                        update(job.id) {
-                            it.copy(status = ModelJob.Status.FAILED, error = shortError(e.message))
-                        }
+                    runCatching { db.queueDao().delete(job.id) }
+                    update(job.id) {
+                        it.copy(status = ModelJob.Status.FAILED, error = shortError(e.message))
                     }
+                    // Brief pause before the next job — lets NVIDIA recover a little.
+                    delay(3_000)
                 }
             }
         }
@@ -257,10 +241,6 @@ class ModelQueue private constructor(app: Application) {
     }
 
     companion object {
-        /** Full passes through the retry ladder before a job is given up on. */
-        private const val MAX_ROUNDS = 2
-        private const val RETRY_BACKOFF_MS = 15_000L
-
         @Volatile private var instance: ModelQueue? = null
 
         fun get(app: Application): ModelQueue = instance ?: synchronized(this) {
