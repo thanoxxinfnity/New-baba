@@ -62,13 +62,16 @@ private fun sensorValues(type: Int): FloatArray? {
 @Composable
 fun CompassScreen(onMenu: () -> Unit = {}) {
     val rot = sensorValues(Sensor.TYPE_ROTATION_VECTOR)
-    var azimuth by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(rot) {
+    // Derived, not a LaunchedEffect: the sensor hands back a fresh FloatArray on
+    // every reading, and FloatArray compares by identity — so keying an effect on
+    // it tore down and restarted a coroutine ~60 times a second for maths that is
+    // pure and instant.
+    val azimuth = remember(rot) {
         rot?.let {
             val r = FloatArray(9); SensorManager.getRotationMatrixFromVector(r, it)
             val o = FloatArray(3); SensorManager.getOrientation(r, o)
-            azimuth = ((Math.toDegrees(o[0].toDouble()).toFloat()) + 360) % 360
-        }
+            ((Math.toDegrees(o[0].toDouble()).toFloat()) + 360) % 360
+        } ?: 0f
     }
     val anim by animateFloatAsState(-azimuth, label = "compass")
 

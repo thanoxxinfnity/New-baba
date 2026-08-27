@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.trellis.studio.ui.components.ToolHeader
 import com.trellis.studio.ui.theme.*
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 /** Feature: Fake Call — schedule a realistic incoming call to prank a friend or
  *  escape an awkward moment. Rings and vibrates like the real thing. */
@@ -141,7 +142,7 @@ private fun ConnectedCall(name: String, seconds: Int, onEnd: () -> Unit) {
         }
         Spacer(Modifier.height(20.dp))
         Text(name, color = TextPrimary, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("%02d:%02d".format(seconds / 60, seconds % 60), color = Teal, style = MaterialTheme.typography.titleMedium)
+        Text(String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60), color = Teal, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.weight(1f))
         CallButton(Icons.Default.CallEnd, Color(0xFFE53935), "End", onEnd)
         Spacer(Modifier.height(60.dp))

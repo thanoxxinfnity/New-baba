@@ -16,6 +16,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URLEncoder
 
+/** A rejected API key: worth surfacing rather than papering over with a fallback. */
+class AuthException(message: String) : Exception(message)
+
 /** Handles image generation from NVIDIA NIM (Flux, SDXL) and Pollinations */
 class ImageGenClient(private val context: Context) {
     private val client = OkHttpClient.Builder()
@@ -43,19 +46,22 @@ class ImageGenClient(private val context: Context) {
     ): Result<String> = withContext(Dispatchers.IO) {
         when (model.apiStyle) {
             ImageApiStyle.POLLINATIONS -> generatePollinations(prompt, width, height, seed, apiKey)
-            ImageApiStyle.FLUX -> generateFlux(apiKey, model, prompt, width, height, seed)
+            ImageApiStyle.FLUX -> generateFlux(apiKey, model, prompt, negativePrompt, width, height, seed)
             ImageApiStyle.SDXL -> generateSdxl(apiKey, model, prompt, negativePrompt, width, height, seed)
         }
     }
 
     private suspend fun generateFlux(
         apiKey: String, model: ImageModel, prompt: String,
-        width: Int, height: Int, seed: Long,
+        negativePrompt: String, width: Int, height: Int, seed: Long,
     ): Result<String> {
         // Without a key, or if NVIDIA FLUX fails (quota, capacity), fall back to
         // free Pollinations so the user still gets an image instead of an error.
         if (apiKey.isBlank()) return generatePollinations(prompt, width, height, seed, apiKey)
-        val reqBody = FluxImageRequest(prompt = prompt, width = width, height = height, seed = seed)
+        val reqBody = FluxImageRequest(
+            prompt = withNegative(prompt, negativePrompt),
+            width = width, height = height, seed = seed,
+        )
         val body = json.encodeToString(reqBody).asJsonBody(JSON_MEDIA)
         val request = Request.Builder()
             .url(model.apiBaseUrl)
@@ -68,11 +74,24 @@ class ImageGenClient(private val context: Context) {
                 handleImageResponse(response, "flux_${System.currentTimeMillis()}")
             }
         }
-        return result.recoverCatching {
-            // NVIDIA didn't deliver — use the free path rather than failing.
+        return result.recoverCatching { e ->
+            // A rejected key is the user's to fix — silently serving a lower-quality
+            // Pollinations image instead made a bad key look like a working one, so
+            // the "why aren't my images photoreal?" cause stayed invisible. Only
+            // capacity and network failures fall back.
+            if (e is AuthException) throw e
             generatePollinations(prompt, width, height, seed, apiKey).getOrThrow()
         }
     }
+
+    /**
+     * FLUX has no negative-prompt field — NVIDIA answers 422 "Extra inputs are not
+     * permitted" for `negative_prompt` (verified live), so the UI's negative prompt
+     * was being silently dropped. FLUX does follow natural language, so the
+     * exclusions ride along in the prompt itself, where they actually take effect.
+     */
+    private fun withNegative(prompt: String, negative: String): String =
+        if (negative.isBlank()) prompt else "$prompt. Avoid: ${negative.trim()}"
 
     private suspend fun generateSdxl(
         apiKey: String, model: ImageModel, prompt: String,
@@ -121,6 +140,11 @@ class ImageGenClient(private val context: Context) {
                     saveBitmapBytes(bytes, "poll_${System.currentTimeMillis()}")
                 }
                 return@withContext Result.success(path)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Cancelling the screen must stop the retries, not feed them: caught
+                // as a plain Exception this kept looping and re-issuing requests
+                // after the caller had already walked away.
+                throw e
             } catch (e: Exception) {
                 last = e
                 if (attempt < 2) kotlinx.coroutines.delay(1500L * (attempt + 1))
@@ -136,7 +160,7 @@ class ImageGenClient(private val context: Context) {
         val body = response.body?.string() ?: ""
         when {
             response.code == 401 || response.code == 403 ->
-                throw Exception("API key rejected (${response.code}). Check your nvapi- key in Settings.")
+                throw AuthException("API key rejected (${response.code}). Check your nvapi- key in Settings.")
             response.code == 429 -> throw Exception("Rate limit reached. Wait a moment and retry.")
             !response.isSuccessful -> throw Exception("Image generation failed (${response.code}): $body")
         }

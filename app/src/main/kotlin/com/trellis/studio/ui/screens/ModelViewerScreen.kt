@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.Locale
 
 /**
  * 360° viewer for generated .glb models.
@@ -104,6 +105,11 @@ fun ModelViewerScreen(
         size = withContext(Dispatchers.IO) { MeshSimplifier.measure(file) }
         loading = true
         error = null
+        // Destroy before dropping the reference. SceneView's rememberNodes only
+        // destroys what is still in the list when the screen is disposed, so a
+        // bare clear() orphaned the previous model's Filament buffers and
+        // textures — native memory that leaked on every model switch.
+        nodes.forEach { runCatching { it.destroy() } }
         nodes.clear()
         clipNames = emptyList()
         runCatching {
@@ -637,7 +643,7 @@ private fun DetailPicker(
             Spacer(Modifier.width(8.dp))
             original?.let {
                 Text(
-                    "now ${"%,d".format(it.triangles)} triangles · ${FileExport.humanSize(it.bytes)}",
+                    "now ${String.format(Locale.US, "%,d", it.triangles)} triangles · ${FileExport.humanSize(it.bytes)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextDisabled,
                 )
@@ -672,7 +678,7 @@ private fun DetailPicker(
             Text(
                 advanced?.let { o ->
                     buildString {
-                        append(if (o.targetTriangles > 0) "%,d tris".format(o.targetTriangles) else "all tris")
+                        append(if (o.targetTriangles > 0) String.format(Locale.US, "%,d tris", o.targetTriangles) else "all tris")
                         if (o.textureSize > 0) append(" · ${o.textureSize}px")
                         if (o.smoothNormals) append(" · smooth")
                         if (o.tangents) append(" · tangents")

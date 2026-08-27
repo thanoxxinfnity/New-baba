@@ -249,6 +249,8 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 previewPath?.let { play(it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update { it.copy(isCloning = false, status = null, error = e.message) }
             }
@@ -340,6 +342,8 @@ class VoiceViewModel(app: Application) : AndroidViewModel(app) {
                 }.onFailure { e ->
                     _state.update { it.copy(isGenerating = false, status = null, error = e.message) }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update { it.copy(isGenerating = false, status = null, error = e.message) }
             }

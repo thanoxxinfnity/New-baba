@@ -230,7 +230,7 @@ fun ColorConverterScreen(onMenu: () -> Unit = {}) {
                 val hsv = FloatArray(3); android.graphics.Color.colorToHSV(parsed, hsv)
                 InfoLine("RGB", "rgb($r, $g, $b)")
                 InfoLine("HSL", "hsl(${hsv[0].toInt()}, ${(hsv[1] * 100).toInt()}%, ${(hsv[2] * 100).toInt()}%)")
-                InfoLine("HEX", String.format("#%06X", 0xFFFFFF and parsed))
+                InfoLine("HEX", String.format(Locale.US, "#%06X", 0xFFFFFF and parsed))
             } else Text("Enter a valid hex like #38BDF8", color = Pink, style = MaterialTheme.typography.bodySmall)
         }
     }

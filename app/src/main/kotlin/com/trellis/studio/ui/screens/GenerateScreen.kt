@@ -175,9 +175,11 @@ private fun ImageGenerateTab(
             maxLines = 2,
         )
 
-        // Size picker row
+        // Size picker. 1344 belongs here: it's the default and the sharpest size
+        // NVIDIA FLUX accepts (verified live), but it was missing from the chips —
+        // so no chip lit up on open and the best quality was unreachable by tapping.
+        val sizes = listOf(768 to "768", 1024 to "1024", 1344 to "1344 ★")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val sizes = listOf(512 to "512", 768 to "768", 1024 to "1024")
             Text("Width:", style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.align(Alignment.CenterVertically))
             sizes.forEach { (size, label) ->
                 FilterChip(
@@ -194,7 +196,6 @@ private fun ImageGenerateTab(
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val sizes = listOf(512 to "512", 768 to "768", 1024 to "1024")
             Text("Height:", style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.align(Alignment.CenterVertically))
             sizes.forEach { (size, label) ->
                 FilterChip(

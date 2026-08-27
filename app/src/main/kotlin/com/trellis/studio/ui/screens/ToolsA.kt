@@ -21,6 +21,7 @@ import com.trellis.studio.ui.components.ToolHeader
 import com.trellis.studio.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlin.random.Random
+import java.util.Locale
 
 // ───────────────────────── Focus Timer (Pomodoro) ─────────────────────────
 @Composable
@@ -46,7 +47,7 @@ fun FocusTimerScreen(onMenu: () -> Unit = {}) {
                     color = CardHigh, strokeWidth = 14.dp)
                 CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize(),
                     color = if (leftSec < 60) Pink else Cyan, strokeWidth = 14.dp)
-                Text("%02d:%02d".format(leftSec / 60, leftSec % 60),
+                Text(String.format(Locale.US, "%02d:%02d", leftSec / 60, leftSec % 60),
                     style = MaterialTheme.typography.displayMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -111,7 +112,7 @@ fun StopwatchScreen(onMenu: () -> Unit = {}) {
 
 private fun fmtMs(ms: Long): String {
     val m = ms / 60000; val s = (ms / 1000) % 60; val cs = (ms % 1000) / 10
-    return "%02d:%02d.%02d".format(m, s, cs)
+    return String.format(Locale.US, "%02d:%02d.%02d", m, s, cs)
 }
 
 // ───────────────────────────── Dice & Coin ────────────────────────────────

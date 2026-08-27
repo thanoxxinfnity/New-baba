@@ -178,7 +178,7 @@ fun ChargingDisplayScreen(onMenu: () -> Unit = {}) {
                 style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(24.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                Info("Temp", "${"%.1f".format(temp)}°C")
+                Info("Temp", "${String.format(Locale.US, "%.1f", temp)}°C")
                 Info("Voltage", "${voltage / 1000f}V")
                 Info("Health", health)
             }

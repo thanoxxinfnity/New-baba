@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.trellis.studio.ui.components.ToolHeader
 import com.trellis.studio.ui.theme.*
 import kotlin.random.Random
+import java.util.Locale
 
 // ─────────────────────────── Password Generator ───────────────────────────
 @Composable
@@ -85,22 +86,22 @@ fun UnitConverterScreen(onMenu: () -> Unit = {}) {
 
     val results: List<Pair<String, String>> = when (cat) {
         "Length" -> listOf(
-            "meters" to "%.3f".format(value),
-            "feet" to "%.3f".format(value * 3.28084),
-            "inches" to "%.2f".format(value * 39.3701),
-            "km" to "%.4f".format(value / 1000),
-            "miles" to "%.4f".format(value / 1609.34),
+            "meters" to String.format(Locale.US, "%.3f", value),
+            "feet" to String.format(Locale.US, "%.3f", value * 3.28084),
+            "inches" to String.format(Locale.US, "%.2f", value * 39.3701),
+            "km" to String.format(Locale.US, "%.4f", value / 1000),
+            "miles" to String.format(Locale.US, "%.4f", value / 1609.34),
         )
         "Weight" -> listOf(
-            "kg" to "%.3f".format(value),
-            "pounds" to "%.3f".format(value * 2.20462),
-            "grams" to "%.0f".format(value * 1000),
-            "ounces" to "%.2f".format(value * 35.274),
+            "kg" to String.format(Locale.US, "%.3f", value),
+            "pounds" to String.format(Locale.US, "%.3f", value * 2.20462),
+            "grams" to String.format(Locale.US, "%.0f", value * 1000),
+            "ounces" to String.format(Locale.US, "%.2f", value * 35.274),
         )
         else -> listOf(
-            "°C" to "%.1f".format(value),
-            "°F" to "%.1f".format(value * 9 / 5 + 32),
-            "K" to "%.1f".format(value + 273.15),
+            "°C" to String.format(Locale.US, "%.1f", value),
+            "°F" to String.format(Locale.US, "%.1f", value * 9 / 5 + 32),
+            "K" to String.format(Locale.US, "%.1f", value + 273.15),
         )
     }
     Column(Modifier.fillMaxSize().background(BgDark)) {
@@ -114,7 +115,8 @@ fun UnitConverterScreen(onMenu: () -> Unit = {}) {
             OutlinedTextField(value = input, onValueChange = { input = it },
                 label = { Text("Value (${if (cat == "Temp") "°C" else results.first().first})", color = TextSecondary) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), singleLine = true)
-            results.drop(if (cat == "Temp") 1 else 1).forEach { (unit, v) ->
+            // The first row is the input unit itself, so only the conversions show.
+            results.drop(1).forEach { (unit, v) ->
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(CardDark).padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(unit, color = TextSecondary)

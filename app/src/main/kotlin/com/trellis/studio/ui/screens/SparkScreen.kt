@@ -51,8 +51,11 @@ fun SparkScreen(vm: SparkViewModel = viewModel(), onMenu: () -> Unit = {}) {
     val apps by vm.apps.collectAsStateWithLifecycle()
     var idea by remember { mutableStateOf("") }
 
-    // Running app view (WebView) takes over the screen.
-    if (s.html != null) {
+    // Running app view (WebView) takes over the screen. The html is pinned to a
+    // local first: `s` re-reads the flow on every access, so the AndroidView
+    // update lambda could run just after closeApp() cleared it and hit an NPE.
+    val runningHtml = s.html
+    if (runningHtml != null) {
         Column(Modifier.fillMaxSize().background(Color.Black)) {
             Surface(color = SurfDark) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
@@ -75,7 +78,7 @@ fun SparkScreen(vm: SparkViewModel = viewModel(), onMenu: () -> Unit = {}) {
                         setBackgroundColor(android.graphics.Color.BLACK)
                     }
                 },
-                update = { it.loadDataWithBaseURL(null, s.html!!, "text/html", "utf-8", null) },
+                update = { it.loadDataWithBaseURL(null, runningHtml, "text/html", "utf-8", null) },
                 modifier = Modifier.fillMaxSize(),
             )
         }

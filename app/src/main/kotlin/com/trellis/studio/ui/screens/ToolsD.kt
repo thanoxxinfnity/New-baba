@@ -41,6 +41,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
+import java.util.Locale
 
 // ─────────────────────────── Base64 & Hash (dev) ──────────────────────────
 @Composable
@@ -85,7 +86,7 @@ fun DevToolsScreen(onMenu: () -> Unit = {}) {
 }
 
 private fun hashOf(s: String, algo: String): String =
-    MessageDigest.getInstance(algo).digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+    MessageDigest.getInstance(algo).digest(s.toByteArray()).joinToString("") { String.format(Locale.US, "%02x", it) }
 
 // ────────────────────────── Breathing Exercise ────────────────────────────
 @Composable

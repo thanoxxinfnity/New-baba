@@ -22,6 +22,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trellis.studio.ui.components.MenuButton
 import com.trellis.studio.ui.theme.*
 import com.trellis.studio.viewmodel.DeviceViewModel
+import java.util.Locale
 
 /** Feature: Device Monitor — live RAM, battery, storage, CPU with animated bars. */
 @Composable
@@ -48,10 +49,10 @@ fun DeviceScreen(vm: DeviceViewModel = viewModel(), onMenu: () -> Unit = {}) {
             Meter("Battery", if (v.charging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryStd,
                 v.batteryPct, buildString {
                     append(if (v.charging) "Charging" else "On battery")
-                    if (v.tempC > 0) append(" · ${"%.1f".format(v.tempC)}°C")
+                    if (v.tempC > 0) append(" · ${String.format(Locale.US, "%.1f", v.tempC)}°C")
                 }, if (v.batteryPct < 20) Pink else Teal, invert = true)
             Meter("Storage", Icons.Default.Storage, v.storageUsedPct,
-                "${"%.1f".format(v.storageFreeGb)} GB free of ${"%.0f".format(v.storageTotalGb)} GB", Purple60)
+                "${String.format(Locale.US, "%.1f", v.storageFreeGb)} GB free of ${String.format(Locale.US, "%.0f", v.storageTotalGb)} GB", Purple60)
 
             Card(colors = CardDefaults.cardColors(containerColor = CardDark), shape = RoundedCornerShape(16.dp)) {
                 Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {

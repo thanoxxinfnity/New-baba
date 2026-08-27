@@ -20,6 +20,7 @@ import nvidia.riva.AudioEncoding
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 
 /**
  * NVIDIA Riva text-to-speech, including zero-shot voice cloning.
@@ -143,7 +144,7 @@ class NvidiaTtsClient {
         if (seconds < MIN_PROMPT_SECONDS) {
             return Result.failure(
                 Exception(
-                    "Voice sample is only ${"%.1f".format(seconds)}s — the cloner needs at " +
+                    "Voice sample is only ${String.format(Locale.US, "%.1f", seconds)}s — the cloner needs at " +
                         "least ${MIN_PROMPT_SECONDS}s of speech."
                 )
             )

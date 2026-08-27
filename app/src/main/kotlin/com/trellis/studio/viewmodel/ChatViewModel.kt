@@ -124,10 +124,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun looksLikeImageRequest(text: String): Boolean {
         val t = text.lowercase().trim()
         if (t.startsWith("/image") || t.startsWith("/img") || t.startsWith("/draw")) return true
-        val verbs = listOf("draw", "generate an image", "generate image", "create an image",
-            "make an image", "picture of", "image of", "photo of", "paint", "illustrate",
-            "banao", "bana do", "photo bana", "image bana")
-        return verbs.any { t.startsWith(it) || t.contains(it) }
+
+        // Phrases are specific enough to match anywhere in the message.
+        val phrases = listOf("generate an image", "generate image", "create an image",
+            "make an image", "picture of", "image of", "photo of",
+            "photo bana", "image bana", "bana do")
+        if (phrases.any { t.contains(it) }) return true
+
+        // Single words must match as whole words. Substring matching turned
+        // "how do I withdraw money" into a drawing request (withdraw → draw), and
+        // "file a complaint" into a painting one (complaint → paint).
+        val verbs = listOf("draw", "paint", "illustrate", "banao")
+        return verbs.any { verb -> Regex("\\b${Regex.escape(verb)}\\b").containsMatchIn(t) }
     }
 
     /** Strips the leading command so the prompt reads naturally. */
@@ -141,7 +149,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun generateImageReply(sessionId: Long, prompt: String) {
         _state.update { it.copy(statusMessage = "Generating image…") }
-        val apiKey = prefs.pollKey.first()
+        // The picked model is an NVIDIA NIM one (FLUX by default), so it needs the
+        // nvapi- key. Reading pollKey here meant chat images ran with a blank key
+        // and always silently dropped to Pollinations — which is why pictures made
+        // in Chat came out softer than the same prompt on the Create screen.
+        val apiKey = prefs.nvidiaKey.first()
         val modelId = prefs.selectedImg.first()
         val model = NIM_IMAGE_MODELS.find { it.id == modelId } ?: NIM_IMAGE_MODELS.first()
 

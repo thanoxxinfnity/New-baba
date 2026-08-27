@@ -154,6 +154,8 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
                             it.copy(isGenerating3d = false, error = e.message, statusMessage = null)
                         }
                     }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
             }
@@ -200,6 +202,8 @@ class GenerateViewModel(app: Application) : AndroidViewModel(app) {
                             it.copy(isGenerating3d = false, error = e.message, statusMessage = null)
                         }
                     }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update { it.copy(isGenerating3d = false, error = e.message, statusMessage = null) }
             }
