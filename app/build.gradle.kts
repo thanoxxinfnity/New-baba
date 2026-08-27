@@ -15,8 +15,8 @@ android {
         applicationId = "com.trellis.studio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.1"
     }
 
     defaultConfig {
@@ -33,8 +33,28 @@ android {
         )
     }
 
+    // Release used to inherit no signing config at all, so AGP emitted
+    // app-release-unsigned.apk — and Android refuses to install an unsigned
+    // APK, which is the "App not installed" error. This keystore is checked in
+    // deliberately so every build signs with the same identity and updates
+    // install over one another. It is for personal sideloading; a store release
+    // needs its own private keystore that is never committed.
+    signingConfigs {
+        create("void") {
+            storeFile = rootProject.file("void-release.jks")
+            storePassword = "voidapp"
+            keyAlias = "void"
+            keyPassword = "voidapp"
+            // minSdk is 26, so v1 still matters here alongside the newer schemes.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("void")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
