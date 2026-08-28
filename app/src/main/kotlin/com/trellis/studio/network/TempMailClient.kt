@@ -70,7 +70,7 @@ class TempMailClient {
             val address = "$local@$dom"
             val password = "Void!" + (100000..999999).random()
             val body = buildJsonObject { put("address", address); put("password", password) }
-                .toString().toRequestBody(jsonMedia)
+                .toString().asJsonBody(jsonMedia)
             val req = Request.Builder().url("$base/accounts").post(body).build()
             client.newCall(req).execute().use { resp ->
                 if (resp.code == 422) throw Exception("\"$local\" is taken or invalid — try another name.")
@@ -82,7 +82,7 @@ class TempMailClient {
 
     private fun token(acc: Account): String {
         val body = buildJsonObject { put("address", acc.address); put("password", acc.password) }
-            .toString().toRequestBody(jsonMedia)
+            .toString().asJsonBody(jsonMedia)
         val req = Request.Builder().url("$base/token").post(body).build()
         client.newCall(req).execute().use { resp ->
             val txt = resp.body?.string().orEmpty()
@@ -159,3 +159,13 @@ class TempMailClient {
         </style></head><body>$inner</body></html>
     """.trimIndent()
 }
+
+/**
+ * JSON body without a charset parameter.
+ *
+ * OkHttp's String.toRequestBody appends "; charset=utf-8" when the media type
+ * carries none, which some APIs reject outright with 415. Encoding to bytes
+ * first passes the media type through untouched.
+ */
+private fun String.asJsonBody(media: okhttp3.MediaType) =
+    toByteArray(Charsets.UTF_8).toRequestBody(media)

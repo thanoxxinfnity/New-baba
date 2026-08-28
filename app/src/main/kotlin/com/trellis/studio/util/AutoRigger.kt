@@ -40,6 +40,22 @@ object AutoRigger {
         VEHICLE("Wheels"),
     }
 
+    /**
+     * How the model is holding its arms, which decides where the arm bones go.
+     *
+     * This matters more than it sounds. Arm bones used to be dropped straight
+     * down the sides at a fixed offset, so a T-posed model — the standard way
+     * characters are authored for rigging — got its arm chain buried in its
+     * chest, pointing the wrong way. Rotating that "shoulder" tore the torso
+     * instead of lifting the arm.
+     */
+    enum class Pose(val label: String, val note: String) {
+        AUTO("Auto", "Measure the arms and follow them"),
+        T_POSE("T-pose", "Arms straight out to the sides"),
+        A_POSE("A-pose", "Arms angled down about 45°"),
+        ARMS_DOWN("Arms down", "Arms hanging beside the body"),
+    }
+
     enum class Rig(
         val label: String,
         val note: String,
@@ -163,6 +179,10 @@ object AutoRigger {
         val frame: Frame,
         /** In glTF joint order — these are the node names to drive from code. */
         val bones: List<String>,
+        /** The pose the arm bones were actually built for. */
+        val pose: Pose = Pose.AUTO,
+        /** What the mesh measured as, for the UI to show alongside the result. */
+        val measuredPose: String = "",
     )
 
     /**
@@ -183,6 +203,8 @@ object AutoRigger {
         outputDir: File,
         /** Overrides the measured shape when the user disagrees with it. */
         frame: Frame? = null,
+        /** Overrides the measured arm pose. */
+        pose: Pose = Pose.AUTO,
     ): Result<Rigged> = withContext(Dispatchers.IO) {
         runCatching {
             val (root, bin, mesh, analysis) = open(glb, outputDir)
@@ -199,11 +221,11 @@ object AutoRigger {
                 )
             }
 
-            val skeleton = build(chosen, analysis)
+            val skeleton = build(chosen, analysis, pose)
             val weights = skinWeights(mesh.positions, skeleton, chosen, analysis)
             val out = File(outputDir, "${glb.nameWithoutExtension}_rigged.glb")
             out.writeBytes(inject(root, bin, mesh, skeleton, weights, motion = null, label = "rig"))
-            Rigged(out, chosen, skeleton.bones.map { it.name })
+            Rigged(out, chosen, skeleton.bones.map { it.name }, pose, analysis.poseLabel)
         }
     }
 
@@ -228,8 +250,12 @@ object AutoRigger {
         return Opened(root, bin, mesh, MeshAnalyzer.analyse(mesh.positions))
     }
 
-    private fun build(frame: Frame, analysis: MeshAnalyzer.Analysis): Skeleton = when (frame) {
-        Frame.HUMANOID -> humanoid(analysis)
+    private fun build(
+        frame: Frame,
+        analysis: MeshAnalyzer.Analysis,
+        pose: Pose = Pose.AUTO,
+    ): Skeleton = when (frame) {
+        Frame.HUMANOID -> humanoid(analysis, pose)
         Frame.QUADRUPED -> quadruped(analysis)
         Frame.VEHICLE -> vehicle(analysis)
     }
@@ -382,7 +408,7 @@ object AutoRigger {
      * body 0.99 long — so the bone sat in the belly and moving it dragged the
      * belly. Measured positions are the whole point of this.
      */
-    private fun humanoid(a: MeshAnalyzer.Analysis): Skeleton {
+    private fun humanoid(a: MeshAnalyzer.Analysis, pose: Pose = Pose.AUTO): Skeleton {
         val cx = a.centreX
         val cz = a.centreZ
         val legs = a.limbs.sortedBy { it.x }
@@ -394,7 +420,6 @@ object AutoRigger {
             MeshAnalyzer.Limb(cx + a.width * 0.18f, cz, a.minY, hipY, a.width * 0.18f),
         )
         val pair = if (legs.size >= 2) listOf(legs.first(), legs.last()) else fallback
-        val armSpread = a.width * 0.34f
 
         val bones = mutableListOf<Bone>()
         fun add(name: String, parent: Int, x: Float, y: Float, z: Float): Int {
@@ -406,13 +431,51 @@ object AutoRigger {
         val chest = add("chest", spine, cx, lerp(hipY, a.maxY, 0.62f), cz)
         add("head", chest, cx, lerp(hipY, a.maxY, 0.92f), cz)
 
+        // Where the arms actually are. AUTO follows the measurement when the
+        // arms were found; the explicit poses override it, which is what lets a
+        // user correct a mesh the analysis could not read.
+        val measured = a.arms.takeIf { it.size == 2 }?.sortedBy { it.shoulderX }
+        val effective = if (pose == Pose.AUTO) {
+            when {
+                measured == null -> Pose.ARMS_DOWN
+                else -> Pose.AUTO
+            }
+        } else pose
+
+        val shoulderY = lerp(hipY, a.maxY, 0.58f)
+        val torsoHalf = a.width * 0.16f
+        val armLength = (a.width / 2f - torsoHalf).coerceAtLeast(a.height * 0.18f)
+
         val chains = mutableListOf<Pair<MeshAnalyzer.Limb, List<Int>>>()
         listOf("l", "r").forEachIndexed { index, side ->
             val sign = if (index == 0) -1f else 1f
             val leg = pair[index]
-            val shoulder = add("${side}_shoulder", chest, cx + sign * armSpread, lerp(hipY, a.maxY, 0.58f), cz)
-            val elbow = add("${side}_elbow", shoulder, cx + sign * armSpread, lerp(hipY, a.maxY, 0.30f), cz)
-            add("${side}_hand", elbow, cx + sign * armSpread, hipY, cz)
+
+            // Shoulder and hand for this side, in the pose that applies.
+            val sx: Float; val sy: Float; val sz: Float
+            val hx: Float; val hy: Float; val hz: Float
+            if (effective == Pose.AUTO && measured != null) {
+                val arm = measured[index]
+                sx = arm.shoulderX; sy = arm.shoulderY; sz = arm.shoulderZ
+                hx = arm.handX; hy = arm.handY; hz = arm.handZ
+            } else {
+                // Straight out for a T, 45° down for an A, straight down otherwise.
+                val dropRad = when (effective) {
+                    Pose.T_POSE -> 0.0
+                    Pose.A_POSE -> Math.PI / 4
+                    else -> Math.PI / 2
+                }
+                sx = cx + sign * torsoHalf; sy = shoulderY; sz = cz
+                hx = sx + sign * armLength * cos(dropRad).toFloat()
+                hy = sy - armLength * sin(dropRad).toFloat()
+                hz = cz
+            }
+
+            val shoulder = add("${side}_shoulder", chest, sx, sy, sz)
+            // The elbow belongs halfway along the real arm, whichever way it points.
+            val elbow = add("${side}_elbow", shoulder,
+                lerp(sx, hx, 0.5f), lerp(sy, hy, 0.5f), lerp(sz, hz, 0.5f))
+            add("${side}_hand", elbow, hx, hy, hz)
 
             // The knee sits midway down the real leg, and the foot on the floor.
             val thigh = add("${side}_thigh", hips, leg.x, hipY, leg.z)

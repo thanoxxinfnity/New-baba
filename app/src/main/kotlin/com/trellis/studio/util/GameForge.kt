@@ -92,15 +92,25 @@ object GameForge {
         var c = code
         // get_window_size() / OS.get_window_size() do not exist in Godot 4.
         c = c.replace(Regex("""(?:OS\.)?get_window_size\(\)"""), "get_viewport().get_visible_rect().size")
-        // Demote every inferred `var x :=` to a plain `var x =`. The models keep
-        // using `:=` on right-hand sides whose type Godot can't infer (an untyped
-        // `event as …` result, a subtraction of Variant properties, …), which is a
-        // hard "Cannot infer the type" parse error — verified live in Godot 4.3.
-        // `=` is byte-for-byte identical at runtime (it just makes the variable
-        // dynamically typed), so this removes a whole class of parse errors with
-        // no behaviour change. Only `var` declarations are touched — `const`,
-        // comparisons (`==`, `<=`) and typed `var x: T =` are left alone.
-        c = c.replace(Regex("""(\bvar\s+\w+)\s*:="""), "$1 =")
+        // Demote `var x :=` to `var x =` ONLY where Godot genuinely cannot infer
+        // the type: a null, an empty array or dictionary, a node lookup, or an
+        // `as` cast. Those are hard "Cannot infer the type" parse errors —
+        // verified live in Godot 4.3 — and `=` behaves identically at runtime.
+        //
+        // Demoting every `:=` was wrong: `:=` is ordinary, valid GDScript, and
+        // the blanket rewrite mangled correct code — including this file's own
+        // fallback game, which is built almost entirely from `var x := X.new()`.
+        // A member read off a lowercase name is the common one: `event.position`
+        // where `event` is an untyped parameter is a Variant, so nothing can be
+        // inferred. A capitalised base is a class — `Vector3.ZERO`,
+        // `WorldEnvironment.new()` — and infers fine, so it keeps its `:=`.
+        c = c.replace(
+            Regex(
+                """(\bvar\s+\w+)\s*:=""" +
+                    """(\s*(?:null\b|\[\s*\]|\{\s*\}|\$|get_node\b|[a-z_]\w*\s*\.|[^\n]*\bas\b))"""
+            ),
+            "$1 =$2",
+        )
         // ProceduralSkyMaterial has no sun_latitude / sun_longitude in Godot 4.3
         // — the sun direction comes from the DirectionalLight3D. Drop those lines.
         c = c.replace(Regex("""(?m)^[ \t]*\w+\.sun_(?:latitude|longitude)\s*=.*\R?"""), "")

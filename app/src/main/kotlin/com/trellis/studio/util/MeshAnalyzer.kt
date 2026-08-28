@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -47,9 +48,32 @@ object MeshAnalyzer {
         val radius: Float,
     )
 
+    /**
+     * One arm, measured rather than assumed: where it leaves the body and where
+     * it ends. Only found when the arm is held away from the torso, which is
+     * exactly the T-pose and A-pose case — an arm resting against the body is
+     * indistinguishable from the body itself in the geometry.
+     */
+    data class Arm(
+        val shoulderX: Float, val shoulderY: Float, val shoulderZ: Float,
+        val handX: Float, val handY: Float, val handZ: Float,
+        val radius: Float,
+    ) {
+        /** How far below horizontal the arm points: 0° is a T-pose, 90° hangs down. */
+        val dropDegrees: Float
+            get() {
+                val dx = abs(handX - shoulderX)
+                val dy = shoulderY - handY
+                if (dx < 1e-6f && abs(dy) < 1e-6f) return 90f
+                return Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+            }
+    }
+
     data class Analysis(
         val shape: Shape,
         val limbs: List<Limb>,
+        /** Left then right, or empty when the arms are not held clear of the body. */
+        val arms: List<Arm> = emptyList(),
         val minY: Float,
         val maxY: Float,
         val centreX: Float,
@@ -63,6 +87,20 @@ object MeshAnalyzer {
         val confidence: Float,
     ) {
         val hasLimbs get() = limbs.isNotEmpty()
+
+        /** Average drop of the measured arms, or null when none were found. */
+        val armDropDegrees: Float?
+            get() = arms.takeIf { it.isNotEmpty() }?.map { it.dropDegrees }?.average()?.toFloat()
+
+        /** What the measured arms read as, in the language riggers use. */
+        val poseLabel: String
+            get() = armDropDegrees?.let { d ->
+                when {
+                    d < 22f -> "T-pose (arms out)"
+                    d < 65f -> "A-pose (arms angled down)"
+                    else -> "Arms down"
+                }
+            } ?: "Arms not separated from the body"
 
         /** Plain-language summary for the UI, so the user sees what was found. */
         val summary: String
@@ -157,6 +195,24 @@ object MeshAnalyzer {
             else -> agreement
         }
 
+        // Arms only mean something on an upright figure; a car's wide body would
+        // otherwise read as a pair of outstretched arms.
+        val arms = if (shape == Shape.VEHICLE || shape == Shape.QUADRUPED) emptyList() else {
+            // The legs give the torso's real half-width. Without them, fall back
+            // to a share of the overall width.
+            val torsoHalf = limbs.takeIf { it.isNotEmpty() }
+                ?.maxOf { abs(it.x - (minX + maxX) / 2f) + it.radius }
+                ?: (width * TORSO_HALF_FALLBACK)
+            findArms(
+                p,
+                centreX = (minX + maxX) / 2f,
+                hipY = bodyBaseY,
+                maxY = maxY,
+                width = width,
+                torsoHalf = torsoHalf.coerceAtLeast(width * 0.06f),
+            )
+        }
+
         return Analysis(
             shape = shape,
             limbs = when (shape) {
@@ -164,12 +220,83 @@ object MeshAnalyzer {
                 Shape.SOLID -> emptyList()
                 else -> limbs
             },
+            arms = arms,
             minY = minY, maxY = maxY,
             centreX = (minX + maxX) / 2f, centreZ = (minZ + maxZ) / 2f,
             width = width, height = height, length = length,
             bodyBaseY = bodyBaseY,
             confidence = confidence,
         )
+    }
+
+    /**
+     * Finds arms held clear of the torso.
+     *
+     * Legs are found by slicing horizontally, because legs separate downwards.
+     * Arms separate *sideways*, so the same slicing never sees them — which is
+     * why a T-posed model used to be rigged with its arm bones hanging straight
+     * down inside its chest. This looks along X instead: anything in the upper
+     * body reaching further out than the torso is an arm, and the innermost and
+     * outermost parts of that give a real shoulder and a real hand.
+     *
+     * Returns an empty list when the arms rest against the body, where there is
+     * genuinely nothing to measure.
+     */
+    private fun findArms(
+        p: FloatArray,
+        centreX: Float,
+        hipY: Float,
+        maxY: Float,
+        width: Float,
+        torsoHalf: Float,
+    ): List<Arm> {
+        if (width <= 1e-6f || maxY <= hipY) return emptyList()
+        // Ignore the very top so a wide hat or hair cannot pose as a shoulder.
+        val ceiling = hipY + (maxY - hipY) * 0.97f
+
+        fun side(sign: Float): Arm? {
+            // Everything on this side that reaches past the torso.
+            val xs = ArrayList<Float>(); val ys = ArrayList<Float>(); val zs = ArrayList<Float>()
+            var i = 0
+            while (i < p.size) {
+                val x = p[i]; val y = p[i + 1]; val z = p[i + 2]
+                val out = (x - centreX) * sign
+                if (y in hipY..ceiling && out > torsoHalf) { xs += x; ys += y; zs += z }
+                i += 3
+            }
+            // A handful of stray vertices is noise, not a limb.
+            if (xs.size < ARM_MIN_POINTS) return null
+
+            val reach = xs.indices.maxOf { (xs[it] - centreX) * sign }
+            val armLength = reach - torsoHalf
+            if (armLength < width * ARM_MIN_REACH) return null
+
+            // Average the outermost and innermost slabs so one spike cannot
+            // place a joint. The hand is the far end; the shoulder is where the
+            // arm leaves the torso.
+            fun centroid(pick: (Float) -> Boolean): Triple<Float, Float, Float> {
+                var sx = 0f; var sy = 0f; var sz = 0f; var n = 0
+                for (k in xs.indices) {
+                    if (pick((xs[k] - centreX) * sign)) { sx += xs[k]; sy += ys[k]; sz += zs[k]; n++ }
+                }
+                return if (n == 0) Triple(0f, 0f, 0f) else Triple(sx / n, sy / n, sz / n)
+            }
+            val handBand = reach - armLength * ARM_END_BAND
+            val shoulderBand = torsoHalf + armLength * ARM_END_BAND
+            val (hx, hy, hz) = centroid { it >= handBand }
+            val (shx, shy, shz) = centroid { it <= shoulderBand }
+
+            // Thickness of the arm, for sizing the skin falloff later.
+            val spanY = ys.max() - ys.min()
+            val spanZ = zs.max() - zs.min()
+            val radius = (max(spanY, spanZ) / 2f).coerceAtLeast(width * 0.02f)
+
+            return Arm(shx, shy, shz, hx, hy, hz, radius)
+        }
+
+        val left = side(-1f) ?: return emptyList()
+        val right = side(1f) ?: return emptyList()
+        return listOf(left, right)
     }
 
     /** A stretch of bands that all split into the same number of pieces. */
@@ -438,4 +565,11 @@ object MeshAnalyzer {
     private const val MAX_WHEEL_SHARE = 0.18f
     /** Fitted radius against the cluster's height — catches a collapsed fit. */
     private const val MIN_FIT_RATIO = 0.5f
+
+    // Arm detection. An arm has to reach a real distance past the torso and carry
+    // enough vertices to be a limb rather than a bump.
+    private const val ARM_MIN_POINTS = 24
+    private const val ARM_MIN_REACH = 0.06f
+    private const val ARM_END_BAND = 0.25f
+    private const val TORSO_HALF_FALLBACK = 0.16f
 }

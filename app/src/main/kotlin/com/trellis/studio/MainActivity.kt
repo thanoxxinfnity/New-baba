@@ -81,6 +81,7 @@ val drawerEntries = listOf(
     DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
+    DrawerEntry("rigstudio", "Rig Studio", Icons.Filled.Accessibility, "Bone your own model — T-pose or A-pose", "Workspace"),
     DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
     DrawerEntry("booster", "Game Booster", Icons.Filled.Bolt, "Free memory for smoother games", "Workspace"),
     DrawerEntry("idealab", "Idea Lab", Icons.Filled.Casino, "Surprise-me creative prompts", "Workspace"),
@@ -307,6 +308,12 @@ fun MainContent() {
                         )
                     }
                     composable("spark") { SparkScreen(onMenu = openDrawer) }
+                    composable("rigstudio") {
+                        RigStudioScreen(
+                            onMenu = openDrawer,
+                            onOpenModel = { path, name -> navController.openViewer(path, name) },
+                        )
+                    }
                     composable(NavRoute.Game.route) {
                         GameScreen(
                             onMenu = openDrawer,
