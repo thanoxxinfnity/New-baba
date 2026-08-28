@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- VOID mark: a collapsing ring with a fracture cut through it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- outer glow ring -->
+    <path
+        android:pathData="M54,20 A34,34 0 1,1 53.9,20 Z"
+        android:strokeWidth="3"
+        android:strokeColor="#7C5CFF"
+        android:strokeAlpha="0.55" />
+
+    <!-- main ring -->
+    <path
+        android:pathData="M54,26 A28,28 0 1,1 53.9,26 Z"
+        android:strokeWidth="4.5"
+        android:strokeColor="#38BDF8" />
+
+    <!-- the void: solid core -->
+    <path
+        android:pathData="M54,36 A18,18 0 1,1 53.9,36 Z"
+        android:fillColor="#05060B" />
+
+    <!-- fracture slash -->
+    <path
+        android:pathData="M38,74 L70,30 L64,30 L32,74 Z"
+        android:fillColor="#05060B" />
+    <path
+        android:pathData="M41,74 L73,30 L70.5,30 L38.5,74 Z"
+        android:fillColor="#F472B6" />
+
+    <!-- shard accents -->
+    <path
+        android:pathData="M54,32 L57,38 L51,38 Z"
+        android:fillColor="#38BDF8" />
+    <path
+        android:pathData="M54,76 L57,70 L51,70 Z"
+        android:fillColor="#7C5CFF" />
+</vector>

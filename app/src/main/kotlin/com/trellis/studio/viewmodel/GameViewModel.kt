@@ -1,0 +1,254 @@
+package com.trellis.studio.viewmodel
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.trellis.studio.data.db.AppDatabase
+import com.trellis.studio.data.entity.GenerationEntity
+import com.trellis.studio.data.prefs.AppPrefs
+import com.trellis.studio.network.GameDirector
+import com.trellis.studio.network.TrellisClient
+import com.trellis.studio.util.FileExport
+import com.trellis.studio.util.GameForge
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import java.io.File
+
+/** A generated 3D model the user can drop into a game. */
+data class GameModel(
+    val id: Long,
+    val name: String,
+    val path: String,
+)
+
+/** A finished game in the history, newest first. */
+data class GameHistoryItem(
+    val id: Long,
+    val name: String,
+    val zipPath: String,
+    val createdAt: Long,
+)
+
+/**
+ * Backs the Game screen: pick some of your generated 3D models, describe the
+ * game, and get a complete Godot project that uses them — assembled locally, no
+ * blind UI automation. The AI writes the GDScript; [GameForge] wraps it into a
+ * project that opens and runs in Godot.
+ */
+class GameViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val db = AppDatabase.get(app)
+    private val prefs = AppPrefs(app)
+    private val director = GameDirector()
+    private val trellis = TrellisClient(app)
+
+    val models: StateFlow<List<GameModel>> = db.generationDao().getByType("3d")
+        .map { rows ->
+            rows.mapNotNull { row ->
+                val path = row.modelPath ?: return@mapNotNull null
+                if (!File(path).exists()) return@mapNotNull null
+                GameModel(row.id, row.prompt?.takeIf { it.isNotBlank() } ?: File(path).name, path)
+            }
+        }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Every game built so far — the generation history, newest first. */
+    val games: StateFlow<List<GameHistoryItem>> = db.generationDao().getByType("game")
+        .map { rows ->
+            rows.mapNotNull { row ->
+                val path = row.modelPath ?: return@mapNotNull null
+                if (!File(path).exists()) return@mapNotNull null
+                val name = (row.prompt ?: "")
+                    .removeSuffix(" (Godot project)")
+                    .ifBlank { "VOID Game" }
+                GameHistoryItem(row.id, name, path, row.createdAt)
+            }
+        }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _status = MutableStateFlow<String?>(null)
+    val status: StateFlow<String?> = _status.asStateFlow()
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
+    /** The finished project zip, ready to share/open. */
+    private val _built = MutableStateFlow<File?>(null)
+    val built: StateFlow<File?> = _built.asStateFlow()
+
+    val busy: StateFlow<Boolean> = _status.map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun consumeMessage() { _message.value = null }
+    fun consumeBuilt() { _built.value = null }
+
+    /**
+     * Writes the game code, assembles the Godot project and zips it. [selected]
+     * are the models to include; [idea] is the plain-language description.
+     */
+    fun build(selected: List<GameModel>, idea: String) = viewModelScope.launch {
+        if (_status.value != null) return@launch
+        val apiKey = prefs.nvidiaKey.first()
+        if (apiKey.isBlank()) { _message.value = "Add your NVIDIA API key in Settings first."; return@launch }
+        if (idea.isBlank()) { _message.value = "Describe the game you want first."; return@launch }
+
+        // Map each chosen model to the res:// name the AI will be told to load.
+        val inputs = selected.map { GameForge.ModelInput(File(it.path), it.name) }
+        assembleGame(apiKey, prefs.gameModel.first(), gameName(idea), idea, inputs)
+    }
+
+    /**
+     * The advanced-free path: the user only describes the game. VOID asks the AI
+     * which 3D models it needs, generates each one (text → 3D), then writes and
+     * assembles the game around them. No model picking required.
+     */
+    fun autoBuild(idea: String) = viewModelScope.launch {
+        if (_status.value != null) return@launch
+        val apiKey = prefs.nvidiaKey.first()
+        if (apiKey.isBlank()) { _message.value = "Add your NVIDIA API key in Settings first."; return@launch }
+        if (idea.isBlank()) { _message.value = "Describe the game you want first."; return@launch }
+
+        val model = prefs.gameModel.first()
+
+        _status.value = "Designing the game assets…"
+        val specs = director.planAssets(apiKey, model, idea).getOrElse {
+            // Planning failed — still build the game, from primitives.
+            emptyList()
+        }
+
+        // Generate each asset. 3D generation is a capacity coin-flip, so cap the
+        // attempts (maxAttempts) — a model that won't come out quickly is skipped
+        // rather than hanging the build for many minutes; the game then falls back
+        // to primitives for anything missing. Each model that DOES come out is
+        // rigged (bones added) and saved to the VOID gallery so it is reusable.
+        val inputs = ArrayList<GameForge.ModelInput>()
+        specs.forEachIndexed { i, spec ->
+            _status.value = "Generating model ${i + 1}/${specs.size}: ${spec.name}…"
+            trellis.generateFromText(apiKey, spec.prompt, maxAttempts = 4)
+                .onSuccess { path ->
+                    val usable = riggedOrRaw(File(path), spec.name)
+                    saveModelToGallery(usable, spec.name)
+                    inputs.add(GameForge.ModelInput(usable, spec.role))
+                }
+        }
+
+        if (inputs.isEmpty() && specs.isNotEmpty()) {
+            _message.value = "The 3D service was busy, so the game uses simple shapes for now."
+        }
+        assembleGame(apiKey, model, gameName(idea), idea, inputs)
+    }
+
+    /**
+     * Adds bones to a generated model so it is animation-ready, returning the
+     * rigged file. Rigging fails for a solid shape with no limbs (a coin, a
+     * barrel) — that's fine, we just keep the original.
+     */
+    private suspend fun riggedOrRaw(glb: File, name: String): File {
+        _status.value = "Rigging $name…"
+        val dir = File(getApplication<Application>().filesDir, "models3d").apply { mkdirs() }
+        return com.trellis.studio.util.AutoRigger.addBones(glb, dir)
+            .map { it.file }
+            .getOrDefault(glb)
+    }
+
+    /** Registers a generated model in the VOID gallery (type "3d"), reusable later. */
+    private suspend fun saveModelToGallery(glb: File, name: String) {
+        runCatching {
+            db.generationDao().insert(
+                GenerationEntity(type = "3d", prompt = name, modelPath = glb.absolutePath)
+            )
+        }
+    }
+
+    /** Shared: write the GDScript, assemble the project, store it in history. */
+    private suspend fun assembleGame(
+        apiKey: String,
+        model: String,
+        name: String,
+        idea: String,
+        inputs: List<GameForge.ModelInput>,
+    ) {
+        val resInputs = inputs.mapIndexed { i, input ->
+            input to GameForge.modelName(input.role, i + 1)
+        }
+        val modelLines = resInputs.map { (input, resName) -> "- $resName.glb : ${input.role}" }
+
+        _status.value = "Writing & checking the game code… (up to ~2 min)"
+        // Write the REAL game the user described. Try twice — a first failure is
+        // usually a transient model hiccup, and getting the real game (not the
+        // canned fallback) is what stops games feeling "fake". Only if both tries
+        // fail do we drop in the hand-written, Godot-verified fallback so a
+        // runnable zip is still produced (it reuses whatever models were made).
+        var writeResult = director.write(apiKey, model, idea, modelLines)
+        if (writeResult.isFailure) {
+            _status.value = "Retrying the game code…"
+            writeResult = director.write(apiKey, model, idea, modelLines)
+        }
+        val code = writeResult.getOrElse { err ->
+            _message.value = "Used a ready-made playable game — the AI code step " +
+                "failed twice (${err.message ?: "unknown"}). Check your NVIDIA key in Settings."
+            GameForge.FALLBACK_GAME
+        }
+
+        _status.value = "Assembling the Godot project…"
+        GameForge.assemble(name, code, inputs, FileExport.outputDir(getApplication()))
+            .onSuccess { assembled ->
+                runCatching {
+                    db.generationDao().insert(
+                        GenerationEntity(
+                            type = "game",
+                            prompt = name,
+                            modelPath = assembled.zip.absolutePath,
+                        )
+                    )
+                }
+                _status.value = null
+                _built.value = assembled.zip
+                _message.value = "Game ready: $name"
+            }
+            .onFailure { err ->
+                // Even assembly failing shouldn't leave the user empty-handed —
+                // retry once with the guaranteed fallback code.
+                GameForge.assemble(name, GameForge.FALLBACK_GAME, inputs, FileExport.outputDir(getApplication()))
+                    .onSuccess { assembled ->
+                        runCatching {
+                            db.generationDao().insert(
+                                GenerationEntity(type = "game", prompt = name, modelPath = assembled.zip.absolutePath)
+                            )
+                        }
+                        _status.value = null
+                        _built.value = assembled.zip
+                        _message.value = "Game ready: $name"
+                    }
+                    .onFailure {
+                        _status.value = null
+                        _message.value = err.message ?: "Couldn't assemble the project."
+                    }
+            }
+    }
+
+    /** Re-share a game from the history. */
+    fun openGame(item: GameHistoryItem) { _built.value = File(item.zipPath) }
+
+    fun deleteGame(item: GameHistoryItem) = viewModelScope.launch {
+        runCatching {
+            File(item.zipPath).delete()
+            db.generationDao().delete(item.id)
+        }
+    }
+
+    private fun gameName(idea: String): String =
+        idea.trim().split(Regex("\\s+")).take(4).joinToString(" ")
+            .replaceFirstChar { it.uppercase() }
+            .ifBlank { "VOID Game" }
+}

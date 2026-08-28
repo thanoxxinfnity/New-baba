@@ -1,8 +1,10 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.protobuf)
 }
 
 android {
@@ -11,95 +13,123 @@ android {
 
     defaultConfig {
         applicationId = "com.trellis.studio"
-        minSdk = 29
+        minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "2.1"
+    }
 
-        // Provide the key via gradle property or environment variable:
-        //   ./gradlew assembleDebug -PTRELLIS_API_KEY=nvapi-xxxx
-        val trellisKey = (project.findProperty("TRELLIS_API_KEY") as String?)
-            ?: System.getenv("TRELLIS_API_KEY")
-            ?: ""
-        buildConfigField("String", "TRELLIS_API_KEY", "\"$trellisKey\"")
+    defaultConfig {
+        // Real phones are ARM; the x86 Filament libs only serve emulators and
+        // cost ~14 MB, so they are left out of the shipped APK.
+        ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a") }
+    }
+
+    packaging {
+        resources.excludes += setOf(
+            "META-INF/*.version", "META-INF/*.kotlin_module",
+            "DebugProbesKt.bin", "kotlin-tooling-metadata.json",
+            "META-INF/com/android/build/gradle/*",
+        )
+    }
+
+    // Release used to inherit no signing config at all, so AGP emitted
+    // app-release-unsigned.apk — and Android refuses to install an unsigned
+    // APK, which is the "App not installed" error. This keystore is checked in
+    // deliberately so every build signs with the same identity and updates
+    // install over one another. It is for personal sideloading; a store release
+    // needs its own private keystore that is never committed.
+    signingConfigs {
+        create("void") {
+            storeFile = rootProject.file("void-release.jks")
+            storePassword = "voidapp"
+            keyAlias = "void"
+            keyPassword = "voidapp"
+            // minSdk is 26, so v1 still matters here alongside the newer schemes.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
 
     buildTypes {
         release {
-            // Minified + shrunk so the APK stays small (material-icons-extended is
-            // huge unshrunk). Signed with the debug key so it can be sideloaded
-            // directly; replace with a real signing config for store distribution.
+            signingConfig = signingConfigs.getByName("void")
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
-
-    // Per-ABI APKs (arm64 covers virtually all current phones) plus a universal one.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
-        }
-    }
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { compose = true }
     packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
+        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     }
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    val composeBom = platform(libs.androidx.compose.bom)
+    implementation(composeBom)
 
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.coil.compose)
+    implementation(libs.androidx.exifinterface)
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation(libs.sceneview)
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // NVIDIA Riva TTS is gRPC-only — there is no JSON/HTTP interface for it.
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.protobuf.lite)
+    implementation(libs.grpc.stub)
+    implementation(libs.protobuf.javalite)
+    compileOnly(libs.javax.annotation.api)
 
-    // Networking
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
+    // AnimationBaker writes glTF containers by hand, so its output is checked
+    // byte for byte on the JVM rather than only on a device.
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 
-    // Image loading
-    implementation("io.coil-kt:coil-compose:2.7.0")
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
+}
 
-    // Local history storage
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
-
-    // 3D GLB rendering (Filament-based)
-    implementation("io.github.sceneview:sceneview:2.2.1")
-
-    // On-device background removal (free, no API key, no network call)
-    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+// Generates the Riva TTS stubs. javalite/lite keeps the generated code small
+// enough for an app, which the full protobuf runtime would not be.
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.get()}" }
+    plugins {
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpc.get()}"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins { create("java") { option("lite") } }
+            task.plugins { create("grpc") { option("lite") } }
+        }
+    }
 }
