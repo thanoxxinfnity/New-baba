@@ -168,6 +168,73 @@ class AutoRiggerTest {
         }
     }
 
+    /**
+     * The question that actually matters for a game: if the engine rotates
+     * `r_shoulder`, does the arm move?
+     *
+     * It only moves if arm geometry is bound to arm bones. The old rigger put
+     * the arm chain straight down inside the chest whatever the pose, so on a
+     * T-posed model those bones owned torso vertices — rotating a shoulder
+     * twisted the body and left the arm hanging in space.
+     */
+    @Test
+    fun `arm bones own the arm on a T-posed figure`() = runBlocking {
+        val source = temp.newFile("tpose.glb").apply { writeBytes(tPosedGlb()) }
+        val result = AutoRigger
+            .addBones(source, temp.newFolder("tpose"), pose = AutoRigger.Pose.T_POSE)
+            .getOrThrow()
+        val g = Rigged(result.file.readBytes())
+
+        listOf("l_shoulder", "l_elbow", "l_hand", "r_shoulder", "r_elbow", "r_hand").forEach { name ->
+            val bone = result.bones.indexOf(name)
+            assertTrue("$name is missing from the skeleton", bone >= 0)
+            val owned = (0 until g.vertexCount).count { v ->
+                (0 until 4).any { g.jointIndices[v * 4 + it] == bone && g.weights[v * 4 + it] > 0.1f }
+            }
+            assertTrue("$name owns no vertices, so rotating it does nothing", owned > 0)
+        }
+
+        // The point of the rig: geometry way out at the end of the arm must be
+        // driven by the arm chain, not by the spine or chest. A hand vertex
+        // sharing influence between r_elbow and r_hand is normal skinning — what
+        // must never happen is a torso bone owning it, which is what the old
+        // straight-down placement produced on a T-posed model.
+        val armChain = listOf("r_shoulder", "r_elbow", "r_hand").map { result.bones.indexOf(it) }
+        val farArm = (0 until g.vertexCount).filter { g.positions[it * 3] > 0.35f }
+        assertTrue("the test figure should have geometry out at the hand", farArm.isNotEmpty())
+
+        val drivenByArm = farArm.count { v ->
+            val best = (0 until 4).maxByOrNull { g.weights[v * 4 + it] }!!
+            g.jointIndices[v * 4 + best].toInt() in armChain
+        }
+        assertEquals(
+            "every vertex at the end of the arm must be driven by an arm bone",
+            farArm.size, drivenByArm,
+        )
+    }
+
+    @Test
+    fun `an A-posed figure binds its arms too`() = runBlocking {
+        val source = temp.newFile("apose.glb").apply { writeBytes(tPosedGlb(armDropDegrees = 45f)) }
+        val result = AutoRigger
+            .addBones(source, temp.newFolder("apose"), pose = AutoRigger.Pose.A_POSE)
+            .getOrThrow()
+        val g = Rigged(result.file.readBytes())
+
+        listOf("l_hand", "r_hand").forEach { name ->
+            val bone = result.bones.indexOf(name)
+            val owned = (0 until g.vertexCount).count { v ->
+                (0 until 4).any { g.jointIndices[v * 4 + it] == bone && g.weights[v * 4 + it] > 0.1f }
+            }
+            assertTrue("$name owns no vertices on an A-pose", owned > 0)
+        }
+        // Weights must still be a valid partition of unity, pose notwithstanding.
+        for (v in 0 until g.vertexCount) {
+            val sum = (0 until 4).sumOf { g.weights[v * 4 + it].toDouble() }
+            assertTrue("weights on vertex $v sum to $sum", abs(sum - 1.0) < 1e-3)
+        }
+    }
+
     @Test
     fun `the shape decides the skeleton without being told`() = runBlocking {
         val car = temp.newFile("bones_car.glb").apply { writeBytes(carGlb()) }
@@ -389,6 +456,56 @@ class AutoRiggerTest {
                 p += -0.10f + 0.20f * iz / 8f
             }
             y += 0.03f
+        }
+        return pointCloudGlb(p.toFloatArray())
+    }
+
+    /** A biped whose arms leave the torso at a known angle: 0 is a T, 45 an A. */
+    private fun tPosedGlb(armDropDegrees: Float = 0f): ByteArray {
+        val p = mutableListOf<Float>()
+        val torsoHalf = 0.18f
+        listOf(-0.12f, 0.12f).forEach { lx ->
+            var y = -0.5f
+            while (y <= 0.05f) {
+                for (ring in 1..4) {
+                    val r = 0.06f * ring / 4f
+                    for (i in 0 until 20) {
+                        val a = i / 20f * 2f * Math.PI.toFloat()
+                        p += lx + r * cos(a); p += y; p += r * sin(a)
+                    }
+                }
+                y += 0.02f
+            }
+        }
+        var y = 0.05f
+        while (y <= 0.5f) {
+            for (ix in 0..12) for (iz in 0..8) {
+                p += -torsoHalf + 2f * torsoHalf * ix / 12f
+                p += y
+                p += -0.10f + 0.20f * iz / 8f
+            }
+            y += 0.03f
+        }
+        // Arms: solid tubes reaching well past the torso.
+        val rad = Math.toRadians(armDropDegrees.toDouble())
+        val shoulderY = 0.40f
+        val reach = 0.34f
+        listOf(-1f, 1f).forEach { sign ->
+            var t = 0f
+            while (t <= 1f) {
+                val ax = sign * (torsoHalf + reach * t * cos(rad).toFloat())
+                val ay = shoulderY - reach * t * sin(rad).toFloat()
+                for (ring in 1..3) {
+                    val r = 0.035f * ring / 3f
+                    for (i in 0 until 16) {
+                        val th = i / 16f * 2f * Math.PI.toFloat()
+                        p += ax + r * cos(th) * sin(rad).toFloat()
+                        p += ay + r * cos(th) * cos(rad).toFloat()
+                        p += r * sin(th)
+                    }
+                }
+                t += 0.035f
+            }
         }
         return pointCloudGlb(p.toFloatArray())
     }
