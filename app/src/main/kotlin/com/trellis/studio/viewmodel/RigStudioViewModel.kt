@@ -33,6 +33,8 @@ class RigStudioViewModel(app: Application) : AndroidViewModel(app) {
         val status: String? = null,
         val error: String? = null,
         val result: AutoRigger.Rigged? = null,
+        /** Set after a successful save, so the screen can confirm it. */
+        val savedNote: String? = null,
     )
 
     private val _state = MutableStateFlow(State())
@@ -49,7 +51,7 @@ class RigStudioViewModel(app: Application) : AndroidViewModel(app) {
     fun importModel(uri: Uri) {
         viewModelScope.launch {
             _state.update {
-                it.copy(busy = true, status = "Reading the model…", error = null, result = null, analysis = null)
+                it.copy(busy = true, status = "Reading the model…", error = null, result = null, analysis = null, savedNote = null)
             }
             val ctx = getApplication<Application>()
             val outcome = withContext(Dispatchers.IO) {
@@ -100,7 +102,7 @@ class RigStudioViewModel(app: Application) : AndroidViewModel(app) {
         val path = s.sourcePath ?: return
         if (s.busy) return
         viewModelScope.launch {
-            _state.update { it.copy(busy = true, status = "Placing bones…", error = null, result = null) }
+            _state.update { it.copy(busy = true, status = "Placing bones…", error = null, result = null, savedNote = null) }
             val ctx = getApplication<Application>()
             val dir = File(ctx.filesDir, "models3d").apply { mkdirs() }
 
@@ -121,6 +123,39 @@ class RigStudioViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(busy = false, status = null, error = e.message) }
                 }
         }
+    }
+
+    /**
+     * Copies the rigged .glb to a location the user picked, so it lands in their
+     * own storage rather than only in the app's private folder. Sharing could
+     * already hand it to another app; this is the plain "save it to my phone"
+     * path people expect from a download.
+     */
+    fun saveTo(destination: Uri) {
+        val file = _state.value.result?.file ?: return
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<Application>().contentResolver
+                        .openOutputStream(destination)
+                        ?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                        ?: error("Could not write to that location.")
+                }
+            }
+            outcome
+                .onSuccess { _state.update { it.copy(status = null, savedNote = "Saved to your device") } }
+                .onFailure { e -> _state.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** The name to offer in the save dialog. */
+    fun suggestedFileName(): String {
+        val base = _state.value.sourceName
+            ?.substringBeforeLast('.')
+            ?.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            ?.takeIf { it.isNotBlank() }
+            ?: "model"
+        return "${base}_rigged.glb"
     }
 
     private fun displayName(uri: Uri): String {

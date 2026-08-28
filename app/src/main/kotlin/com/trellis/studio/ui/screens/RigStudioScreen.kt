@@ -45,6 +45,10 @@ fun RigStudioScreen(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { vm.importModel(it) }
     }
+    // A real save: the user chooses the folder, the file lands in their storage.
+    val saver = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("model/gltf-binary")
+    ) { uri: Uri? -> uri?.let { vm.saveTo(it) } }
 
     Column(Modifier.fillMaxSize().background(BgDark)) {
         ToolHeader("Rig Studio", "Add a real skeleton to your own 3D model", onMenu)
@@ -201,6 +205,18 @@ fun RigStudioScreen(
                     Text(r.bones.joinToString(", "), color = TextDisabled,
                         style = MaterialTheme.typography.labelSmall)
 
+                    // Saving to the user's own storage is the primary action —
+                    // this is the file they take into Blender or their engine.
+                    Button(
+                        onClick = { saver.launch(vm.suggestedFileName()) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Default.Download, null, tint = BgDark, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Save .glb to my device", color = BgDark, fontWeight = FontWeight.Bold)
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
                             onClick = { onOpenModel(r.file.absolutePath, "Rigged model") },
@@ -211,17 +227,23 @@ fun RigStudioScreen(
                             Icon(Icons.Default.RotateRight, null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(6.dp)); Text("View 360°")
                         }
-                        Button(
+                        OutlinedButton(
                             onClick = { FileExport.share(context, r.file, "model/gltf-binary") },
                             modifier = Modifier.weight(1f).height(46.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Teal),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Icon(Icons.Default.Download, null, tint = BgDark, modifier = Modifier.size(17.dp))
-                            Spacer(Modifier.width(6.dp)); Text("Download", color = BgDark)
+                            Icon(Icons.Default.IosShare, null, tint = Cyan, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp)); Text("Share", color = Cyan)
                         }
                     }
-                    Text("Saved as ${r.file.name} · ${FileExport.humanSize(r.file.length())}",
+                    s.savedNote?.let { note ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, null, tint = Teal, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(note, color = Teal, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Text("${r.file.name} · ${FileExport.humanSize(r.file.length())}",
                         color = TextDisabled, style = MaterialTheme.typography.labelSmall)
                 }
             }
