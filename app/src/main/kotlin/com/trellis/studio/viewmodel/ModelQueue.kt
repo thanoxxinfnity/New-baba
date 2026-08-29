@@ -176,9 +176,11 @@ class ModelQueue private constructor(app: Application) {
                     continue
                 }
 
-                // Hard cap: if NVIDIA is down, don't block the queue for 9 minutes.
-                // 100s covers MAX_ATTEMPTS=4 (2 rounds × 45s each) with a margin.
-                val result = withTimeoutOrNull(100_000L) {
+                // A backstop, not a leash: 12 attempts is 6 rounds of two 45s lanes
+                // plus the pauses between them, about 4.5 minutes, so this sits well
+                // clear of a job that is genuinely still trying. It exists only so a
+                // wedged connection cannot hold the queue open forever.
+                val result = withTimeoutOrNull(6 * 60_000L) {
                     client.generateFromText(
                         apiKey = apiKey,
                         prompt = job.prompt,

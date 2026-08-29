@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.trellis.studio.data.model.NIM_LLM_MODELS
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -34,10 +35,9 @@ class AppPrefs(private val context: Context) {
         val KEY_AGENT_TTS        = booleanPreferencesKey("agent_tts")
 
         // The agent takes one small decision per turn and the user feels every
-        // turn's latency, so it defaults to the fastest model that still plans
-        // correctly. Measured against the live API on the same task: 8B ~0.67s a
-        // turn versus 70B ~2.06s — three times snappier for the same right answer.
-        val DEFAULT_AGENT_MODEL  = "meta/llama-3.1-8b-instruct"
+        // turn's latency, so it defaults to a small, fast model that still plans
+        // correctly. The Llama 8B this used to name was retired by NVIDIA.
+        val DEFAULT_AGENT_MODEL  = "openai/gpt-oss-20b"
 
         // Used only when the screen exposes no accessibility text (Godot, games,
         // canvases): the agent screenshots and this model reads where to tap.
@@ -75,13 +75,12 @@ class AppPrefs(private val context: Context) {
         // just slower (~30–60s a line). Users can duplicate it for a private one.
         val DEFAULT_HF_VOICE_SPACE = "https://minsus-voice-cloning-xtts-v2.hf.space"
         val KEY_GAME_MODEL       = stringPreferencesKey("game_model")
-        // Writes the whole game as one GDScript file. Measured against the live
-        // API on a real "collect the coins" build, GLM produced clean, valid
-        // Godot 4 code (CharacterBody3D, move_and_slide, guarded GLB loads) where
-        // the others slipped in fences or Godot 3 syntax.
-        val DEFAULT_GAME_MODEL   = "z-ai/glm-5.2"
+        // Writes the whole game as one GDScript file, so it wants the strongest
+        // code model available. GLM, which this used to name, was retired by
+        // NVIDIA; DeepSeek V4 Pro is the current best-verified coding model here.
+        val DEFAULT_GAME_MODEL   = "deepseek-ai/deepseek-v4-pro-0813"
 
-        val DEFAULT_LLM     = "meta/llama-3.1-8b-instruct"
+        val DEFAULT_LLM     = "openai/gpt-oss-20b"
         val DEFAULT_IMG     = "black-forest-labs/flux.1-dev"
         val DEFAULT_3D      = "nvidia"
         // Riva voice, not a NIM model id — TTS goes over gRPC to a function id.
@@ -99,7 +98,15 @@ class AppPrefs(private val context: Context) {
     val nvidiaKey: Flow<String>   = ds.data.catchIO().map { it[KEY_NVIDIA_API_KEY] ?: "" }
     val falKey: Flow<String>      = ds.data.catchIO().map { it[KEY_FAL_API_KEY] ?: "" }
     val pollKey: Flow<String>     = ds.data.catchIO().map { it[KEY_POLL_API_KEY] ?: "" }
-    val selectedLlm: Flow<String> = ds.data.catchIO().map { it[KEY_SELECTED_LLM] ?: DEFAULT_LLM }
+    // A stored choice can outlive the model it names: NVIDIA retires models on a
+    // published date and then answers 410 Gone. Changing the default alone would
+    // not have rescued anyone who had ever picked a model, because their saved
+    // preference still pointed at the dead one — so a name that is no longer
+    // offered falls back to the current default instead of failing every send.
+    val selectedLlm: Flow<String> = ds.data.catchIO().map { prefs ->
+        val stored = prefs[KEY_SELECTED_LLM] ?: DEFAULT_LLM
+        if (NIM_LLM_MODELS.any { it.id == stored }) stored else DEFAULT_LLM
+    }
     val selectedImg: Flow<String> = ds.data.catchIO().map { it[KEY_SELECTED_IMG] ?: DEFAULT_IMG }
     val selected3d: Flow<String>  = ds.data.catchIO().map { it[KEY_SELECTED_3D] ?: DEFAULT_3D }
     val selectedTts: Flow<String> = ds.data.catchIO().map { it[KEY_SELECTED_TTS] ?: DEFAULT_TTS }
@@ -111,9 +118,15 @@ class AppPrefs(private val context: Context) {
     val buildServerToken: Flow<String> = ds.data.catchIO().map { it[KEY_BUILD_TOKEN] ?: "" }
     val hinglishThinking: Flow<Boolean> = ds.data.catchIO().map { it[KEY_HINGLISH] ?: false }
     val agentUrl: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_URL] ?: "" }
-    val agentModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_MODEL] ?: DEFAULT_AGENT_MODEL }
+    val agentModel: Flow<String> = ds.data.catchIO().map { prefs ->
+        val stored = prefs[KEY_AGENT_MODEL] ?: DEFAULT_AGENT_MODEL
+        if (NIM_LLM_MODELS.any { it.id == stored }) stored else DEFAULT_AGENT_MODEL
+    }
     val agentVisionModel: Flow<String> = ds.data.catchIO().map { it[KEY_AGENT_VISION] ?: DEFAULT_AGENT_VISION }
-    val gameModel: Flow<String> = ds.data.catchIO().map { it[KEY_GAME_MODEL] ?: DEFAULT_GAME_MODEL }
+    val gameModel: Flow<String> = ds.data.catchIO().map { prefs ->
+        val stored = prefs[KEY_GAME_MODEL] ?: DEFAULT_GAME_MODEL
+        if (NIM_LLM_MODELS.any { it.id == stored }) stored else DEFAULT_GAME_MODEL
+    }
     val youtubeKey: Flow<String> = ds.data.catchIO().map { it[KEY_YT_API] ?: "" }
     val videoServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_VIDEO_SERVER] ?: "" }
     val voiceServerUrl: Flow<String> = ds.data.catchIO().map { it[KEY_VOICE_SERVER] ?: "" }

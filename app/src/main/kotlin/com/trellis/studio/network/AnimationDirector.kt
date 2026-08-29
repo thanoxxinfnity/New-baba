@@ -225,7 +225,7 @@ class AnimationDirector(private val nim: NimClient = NimClient()) {
          * Asked when the chosen model cannot produce JSON. Picked by measurement,
          * not preference: it returned valid JSON on every attempt.
          */
-        const val FALLBACK_MODEL = "meta/llama-3.1-8b-instruct"
+        const val FALLBACK_MODEL = "openai/gpt-oss-20b"
 
         // The bone lists are spelled out because the model has to pick from them
         // exactly; anything invented gets dropped on the way back in.

@@ -28,47 +28,33 @@ enum class ImageApiStyle { FLUX, SDXL, POLLINATIONS }
 // -----------------------------------------------------------------------
 // LLM MODELS — every model here was verified HTTP 200 with a live API key
 // -----------------------------------------------------------------------
+// Re-verified against the live /v1/models list and a real completion call.
+// NVIDIA retires models on a published end-of-life date and then answers 410
+// Gone — twelve of the entries that used to be here had been retired, including
+// the app's own default, so Chat failed for anyone who never changed it. Only
+// models that returned HTTP 200 to an actual request are listed.
 val NIM_LLM_MODELS: List<LlmModel> = listOf(
 
-    // ── Meta Llama ─────────────────────────────────────────────────────
-    LlmModel("meta/llama-3.2-1b-instruct",            "Llama 3.2 1B",          "Meta Llama", isFast = true,  contextK = 128),
-    LlmModel("meta/llama-3.1-8b-instruct",            "Llama 3.1 8B",          "Meta Llama", isFast = true,  contextK = 128),
-    LlmModel("meta/llama-3.1-70b-instruct",           "Llama 3.1 70B",         "Meta Llama",                 contextK = 128),
-
-    // ── Meta Llama Vision ──────────────────────────────────────────────
-    LlmModel("meta/llama-3.2-11b-vision-instruct",    "Llama 3.2 11B Vision",  "Meta Vision", isVision = true, contextK = 128),
-    LlmModel("meta/llama-3.2-90b-vision-instruct",    "Llama 3.2 90B Vision",  "Meta Vision", isVision = true, contextK = 128),
+    // ── OpenAI OSS (served via NVIDIA NIM) ────────────────────────────
+    LlmModel("openai/gpt-oss-20b",                    "GPT OSS 20B",           "OpenAI OSS", isFast = true, contextK = 128),
+    LlmModel("openai/gpt-oss-120b",                   "GPT OSS 120B",          "OpenAI OSS",                contextK = 128),
 
     // ── NVIDIA Nemotron ────────────────────────────────────────────────
-    LlmModel("nvidia/nemotron-mini-4b-instruct",      "Nemotron Mini 4B",      "NVIDIA Nemotron", isFast = true, contextK = 4),
-    LlmModel("nvidia/nvidia-nemotron-nano-9b-v2",     "Nemotron Nano 9B",      "NVIDIA Nemotron", isFast = true, contextK = 128),
-    LlmModel("nvidia/llama-3.3-nemotron-super-49b-v1","Nemotron Super 49B",    "NVIDIA Nemotron",              contextK = 128),
-
-    // ── NVIDIA Vision-Language ─────────────────────────────────────────
-    LlmModel("nvidia/nemotron-nano-12b-v2-vl",        "Nemotron Nano 12B VL",  "NVIDIA Vision", isVision = true, contextK = 128),
-    LlmModel("nvidia/llama-3.1-nemotron-nano-vl-8b-v1","Nemotron Nano VL 8B", "NVIDIA Vision", isVision = true, contextK = 128),
-
-    // ── Mistral ────────────────────────────────────────────────────────
-    LlmModel("mistralai/mistral-nemotron",            "Mistral Nemotron",      "Mistral", isFast = true, contextK = 128),
-    LlmModel("mistralai/mistral-medium-3.5-128b",     "Mistral Medium 3.5",    "Mistral",                 contextK = 128),
+    LlmModel("nvidia/nemotron-3.5-lightning-30b-a3b", "Nemotron 3.5 Lightning", "NVIDIA Nemotron", isFast = true, contextK = 128),
+    LlmModel("nvidia/nemotron-3-super-120b-a12b",     "Nemotron 3 Super 120B", "NVIDIA Nemotron",           contextK = 128),
 
     // ── DeepSeek ───────────────────────────────────────────────────────
-    LlmModel("deepseek-ai/deepseek-v4-flash",         "DeepSeek V4 Flash",     "DeepSeek", isFast = true, contextK = 128),
+    LlmModel("deepseek-ai/deepseek-v4-pro-0813",      "DeepSeek V4 Pro",       "DeepSeek",                  contextK = 128),
+
+    // ── Moonshot ───────────────────────────────────────────────────────
+    LlmModel("moonshotai/kimi-k3",                    "Kimi K3",               "Moonshot",                  contextK = 128),
 
     // ── MiniMax ────────────────────────────────────────────────────────
     LlmModel("minimaxai/minimax-m3",                  "MiniMax M3",            "MiniMax", isFast = true, contextK = 128),
 
-    // ── ZhipuAI GLM ───────────────────────────────────────────────────
-    LlmModel("z-ai/glm-5.2",                          "GLM 5.2",               "ZhipuAI GLM",              contextK = 128),
-
-    // ── OpenAI OSS (served via NVIDIA NIM) ────────────────────────────
-    LlmModel("openai/gpt-oss-20b",                    "GPT OSS 20B",           "OpenAI OSS", isFast = true, contextK = 128),
-
-    // ── Poolside ───────────────────────────────────────────────────────
-    LlmModel("poolside/laguna-xs-2.1",                "Laguna XS 2.1",         "Poolside", isFast = true, contextK = 128),
-
-    // ── StepFun ────────────────────────────────────────────────────────
-    LlmModel("stepfun-ai/step-3.7-flash",             "Step 3.7 Flash",        "StepFun", isFast = true, contextK = 128),
+    // ── Vision ─────────────────────────────────────────────────────────
+    LlmModel("meta/llama-3.2-11b-vision-instruct",    "Llama 3.2 11B Vision",  "Vision", isVision = true, contextK = 128),
+    LlmModel("meta/llama-3.2-90b-vision-instruct",    "Llama 3.2 90B Vision",  "Vision", isVision = true, contextK = 128),
 )
 
 val NIM_LLM_GROUPS: Map<String, List<LlmModel>> by lazy {

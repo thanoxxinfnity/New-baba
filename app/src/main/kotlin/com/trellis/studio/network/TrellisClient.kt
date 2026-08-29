@@ -55,10 +55,12 @@ class TrellisClient(private val context: Context) {
         const val TRELLIS_URL = "https://ai.api.nvidia.com/v1/genai/microsoft/trellis"
         const val ASSETS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
         const val STATUS_URL = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
-        // 4 attempts (2 rounds × 2 lanes). Each lane aborts at 45s, so worst-case
-        // a job burns ~90s before giving up. Keeping this small is critical for
-        // the queue: a stalled job used to block every other item for 4+ minutes.
-        const val MAX_ATTEMPTS = 4
+        // Back to a patient 12 (6 rounds × 2 lanes). Cutting this to 4 to keep the
+        // queue responsive traded away the thing that actually matters: whether a
+        // model arrives at all. Success here is a capacity coin-flip on NVIDIA's
+        // side, so more rounds — each after a pause that lets it recover — is what
+        // turns a failure into an eventual model.
+        const val MAX_ATTEMPTS = 12
         /** Concurrent requests per round. Two is the sweet spot — more of them
          *  made the service reject far more often in testing. */
         const val LANES = 2
