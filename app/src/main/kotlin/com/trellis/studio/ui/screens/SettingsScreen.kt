@@ -36,6 +36,7 @@ fun SettingsScreen(
     val voiceServerUrl by vm.voiceServerUrl.collectAsStateWithLifecycle()
     val voiceProvider by vm.voiceProvider.collectAsStateWithLifecycle()
     val hfToken by vm.hfToken.collectAsStateWithLifecycle()
+    val sketchfabToken by vm.sketchfabToken.collectAsStateWithLifecycle()
     val hfVoiceSpace by vm.hfVoiceSpace.collectAsStateWithLifecycle()
     val systemPrompt by vm.systemPrompt.collectAsStateWithLifecycle()
     val maxTokens by vm.maxTokens.collectAsStateWithLifecycle()
@@ -69,6 +70,14 @@ fun SettingsScreen(
                     description = "Free at huggingface.co/settings/tokens (read scope). Powers " +
                         "free image editing (FLUX Kontext) and accented voice cloning.",
                     onSave = vm::setHfToken,
+                )
+                ApiKeyField(
+                    label = "Sketchfab API token",
+                    value = sketchfabToken,
+                    hint = "your Sketchfab token",
+                    description = "Free at sketchfab.com → Settings → Password & API. Searching " +
+                        "works without it; downloading a model needs it.",
+                    onSave = vm::setSketchfabToken,
                 )
                 ApiKeyField(
                     label = "fal.ai API Key",

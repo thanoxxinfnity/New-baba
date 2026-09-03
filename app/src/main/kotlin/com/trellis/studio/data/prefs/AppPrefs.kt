@@ -69,6 +69,9 @@ class AppPrefs(private val context: Context) {
         val KEY_VAULT_CHECK      = stringPreferencesKey("vault_check")
         val KEY_VAULT_BLOB       = stringPreferencesKey("vault_blob")
         val KEY_API_HISTORY      = stringPreferencesKey("api_history")
+        // Free token from sketchfab.com → Settings → Password & API. Search works
+        // without it; only downloading needs one.
+        val KEY_SKETCHFAB_TOKEN  = stringPreferencesKey("sketchfab_token")
         // A public XTTS voice-clone Space, verified live to clone in Hindi/Indian
         // accent from an uploaded sample. It runs on CPU (no ZeroGPU daily quota),
         // so it stays reliable where a shared GPU Space fails once quota runs out —
@@ -98,6 +101,7 @@ class AppPrefs(private val context: Context) {
     val nvidiaKey: Flow<String>   = ds.data.catchIO().map { it[KEY_NVIDIA_API_KEY] ?: "" }
     val falKey: Flow<String>      = ds.data.catchIO().map { it[KEY_FAL_API_KEY] ?: "" }
     val pollKey: Flow<String>     = ds.data.catchIO().map { it[KEY_POLL_API_KEY] ?: "" }
+    val sketchfabToken: Flow<String> = ds.data.catchIO().map { it[KEY_SKETCHFAB_TOKEN] ?: "" }
     // A stored choice can outlive the model it names: NVIDIA retires models on a
     // published date and then answers 410 Gone. Changing the default alone would
     // not have rescued anyone who had ever picked a model, because their saved
@@ -152,6 +156,7 @@ class AppPrefs(private val context: Context) {
     suspend fun setNvidiaKey(v: String)   = ds.edit { it[KEY_NVIDIA_API_KEY] = v }
     suspend fun setFalKey(v: String)      = ds.edit { it[KEY_FAL_API_KEY] = v }
     suspend fun setPollKey(v: String)     = ds.edit { it[KEY_POLL_API_KEY] = v }
+    suspend fun setSketchfabToken(v: String) = ds.edit { it[KEY_SKETCHFAB_TOKEN] = v }
     suspend fun setSelectedLlm(v: String) = ds.edit { it[KEY_SELECTED_LLM] = v }
     suspend fun setSelectedImg(v: String) = ds.edit { it[KEY_SELECTED_IMG] = v }
     suspend fun setSelected3d(v: String)  = ds.edit { it[KEY_SELECTED_3D] = v }

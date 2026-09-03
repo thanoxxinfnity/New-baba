@@ -80,6 +80,7 @@ val drawerEntries = listOf(
     DrawerEntry("spark", "Spark", Icons.Filled.AutoAwesome, "Describe an app — get a real one", "Workspace"),
     DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
     DrawerEntry("rigstudio", "Rig Studio", Icons.Filled.Accessibility, "Upload your model, add bones, download it", "Workspace"),
+    DrawerEntry("sketchfab", "Sketchfab", Icons.Filled.Download, "Find models by name or link, download them", "Workspace"),
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
     DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
@@ -308,6 +309,12 @@ fun MainContent() {
                         )
                     }
                     composable("spark") { SparkScreen(onMenu = openDrawer) }
+                    composable("sketchfab") {
+                        SketchfabScreen(
+                            onMenu = openDrawer,
+                            onOpenModel = { path, name -> navController.openViewer(path, name) },
+                        )
+                    }
                     composable("rigstudio") {
                         RigStudioScreen(
                             onMenu = openDrawer,
