@@ -120,20 +120,25 @@ object PmxConverter {
 
             // ---- textures ---------------------------------------------------
             val imageIndex = HashMap<Int, Int>()      // pmx texture slot -> gltf image
+            // glTF textures whose image carries an alpha channel. A material using
+            // one has to be told it is cut out, or the viewer paints the
+            // transparent parts as solid — which is what turned Miku's alpha-masked
+            // hair ornaments into black rectangles.
+            val alphaTextures = HashSet<Int>()
             val images = mutableListOf<JsonObject>()
             val samplers = listOf(buildJsonObject { put("wrapS", 10497); put("wrapT", 10497) })
             val texturesJson = mutableListOf<JsonObject>()
             m.textures.forEachIndexed { slot, path ->
                 val bytes = findAsset(assets, path) ?: return@forEachIndexed
+                // Judge the format by its magic bytes, not its name. MMD packs are
+                // full of files renamed by hand — this model's sphere maps are
+                // PNGs called .bmp — and trusting the extension threw away images
+                // glTF could have carried perfectly well.
                 val mime = when {
-                    path.endsWith(".png", true) -> "image/png"
-                    path.endsWith(".jpg", true) || path.endsWith(".jpeg", true) -> "image/jpeg"
-                    // glTF images are PNG or JPEG only; MMD's .bmp/.tga/.spa files
-                    // have no home here, and they are the toon and sphere maps
-                    // this converter deliberately drops anyway.
-                    else -> { notes += "Skipped ${path.substringAfterLast('/')} (${
-                        path.substringAfterLast('.')
-                    } isn't supported by glTF)"; return@forEachIndexed }
+                    isPng(bytes) -> "image/png"
+                    isJpeg(bytes) -> "image/jpeg"
+                    else -> { notes += "Skipped ${path.substringAfterLast('/')} — " +
+                        "glTF only carries PNG and JPEG"; return@forEachIndexed }
                 }
                 val at = put(bytes)
                 images += buildJsonObject {
@@ -141,6 +146,7 @@ object PmxConverter {
                 }
                 texturesJson += buildJsonObject { put("sampler", 0); put("source", images.size - 1) }
                 imageIndex[slot] = texturesJson.size - 1
+                if (hasAlphaChannel(bytes)) alphaTextures += texturesJson.size - 1
             }
 
             // ---- one primitive per material, so each keeps its own texture ---
@@ -168,8 +174,29 @@ object PmxConverter {
                         // MMD models are flat-shaded anime art, not PBR metal.
                         put("metallicFactor", 0f); put("roughnessFactor", 0.9f)
                     })
+                    // An additive sphere map is where some MMD materials keep all of
+                    // their colour: the diffuse patch underneath is deliberately
+                    // black and the sphere adds the shine on top. glTF has no
+                    // sphere mapping, so dropping it left those parts pure black —
+                    // Miku's hair ornaments and headphones came out as black boxes.
+                    // The map's average colour goes in as emissive instead, which
+                    // is additive in the same way, just not view-dependent.
+                    if (mat.sphereMode == SPHERE_ADD) {
+                        averageColour(m.textures.getOrNull(mat.sphereIndex), assets)?.let { rgb ->
+                            put("emissiveFactor", buildJsonArray { rgb.forEach { add(it) } })
+                        }
+                    }
                     put("doubleSided", true)
-                    if (mat.diffuse[3] < 1f) put("alphaMode", "BLEND")
+                    when {
+                        // A part the author faded out with the material's own alpha.
+                        mat.diffuse[3] < 1f -> put("alphaMode", "BLEND")
+                        // Transparency living in the texture instead. MMD alpha-tests
+                        // these (hair cards, ornaments, lace), so MASK matches how
+                        // they are meant to look and avoids sorting artefacts.
+                        tex != null && tex in alphaTextures -> {
+                            put("alphaMode", "MASK"); put("alphaCutoff", 0.5f)
+                        }
+                    }
                 }
                 primitives += buildJsonObject {
                     put("attributes", buildJsonObject {
@@ -275,6 +302,8 @@ object PmxConverter {
     private class Bone(val name: String, val parent: Int, val position: FloatArray)
     private class Material(
         val name: String, val textureIndex: Int, val faceCount: Int, val diffuse: FloatArray,
+        /** MMD sphere map: its own texture slot, and 0 none / 1 multiply / 2 add. */
+        val sphereIndex: Int, val sphereMode: Int,
     )
     private class Model(
         val positions: FloatArray, val normals: FloatArray, val uvs: FloatArray,
@@ -333,7 +362,12 @@ object PmxConverter {
             // handedness, and the triangle winding is reversed to match below.
             positions[i * 3] = b.float; positions[i * 3 + 1] = b.float; positions[i * 3 + 2] = -b.float
             normals[i * 3] = b.float; normals[i * 3 + 1] = b.float; normals[i * 3 + 2] = -b.float
-            uvs[i * 2] = b.float; uvs[i * 2 + 1] = b.float
+            // V is flipped into glTF's convention. Passing it through unchanged
+            // left every texture upside down in any spec-following viewer —
+            // Blender, Unity, Godot — which showed up as a flat, dark face with
+            // no eyelashes, because the eye and skin detail was being sampled
+            // from the wrong half of the sheet.
+            uvs[i * 2] = b.float; uvs[i * 2 + 1] = 1f - b.float
             repeat(addUv) { repeat(4) { b.float } }
 
             when (b.get().toInt()) {
@@ -388,13 +422,13 @@ object PmxConverter {
             repeat(4) { b.float }                            // edge colour
             b.float                                          // edge size
             val texture = sidx(tIdx)
-            sidx(tIdx)                                       // sphere texture
-            b.get()                                          // sphere mode
+            val sphere = sidx(tIdx)
+            val sphereMode = b.get().toInt()
             val sharedToon = b.get().toInt()
             if (sharedToon == 0) sidx(tIdx) else b.get()
             text()                                           // memo
             val faceCount = b.int
-            materials += Material(nameJp, texture, faceCount, diffuse)
+            materials += Material(nameJp, texture, faceCount, diffuse, sphere, sphereMode)
         }
 
         val boneCount = b.int
@@ -438,6 +472,166 @@ object PmxConverter {
         return assets.entries.firstOrNull {
             it.key.replace('\\', '/').lowercase().substringAfterLast('/') == leaf
         }?.value
+    }
+
+    /**
+     * True when a PNG declares an alpha channel. Read from the IHDR colour type
+     * rather than by decoding the image, which would cost megabytes per texture:
+     * 4 is grey+alpha and 6 is RGBA, and an indexed image can carry a tRNS
+     * chunk instead. JPEG has no alpha at all.
+     */
+    private fun isPng(b: ByteArray) = b.size > 8 && b[0] == 0x89.toByte() &&
+        b[1] == 'P'.code.toByte() && b[2] == 'N'.code.toByte() && b[3] == 'G'.code.toByte()
+
+    private fun isJpeg(b: ByteArray) = b.size > 3 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte()
+
+    private fun hasAlphaChannel(bytes: ByteArray): Boolean {
+        if (bytes.size < 26) return false
+        if (!isPng(bytes)) return false
+        return when (bytes[25].toInt()) {
+            4, 6 -> true
+            3 -> String(bytes, 0, minOf(bytes.size, 4096), Charsets.ISO_8859_1).contains("tRNS")
+            else -> false
+        }
+    }
+
+    private const val SPHERE_ADD = 2
+
+    /**
+     * Mean colour of a sphere map, used as a flat stand-in for the shine it
+     * would have added.
+     *
+     * PNG is decoded here rather than through the platform image loader so the
+     * conversion behaves the same on a JVM test as on a device. Only the common
+     * 8-bit RGB and RGBA forms are handled; anything else returns null and the
+     * material simply keeps no emissive.
+     */
+    private fun averageColour(path: String?, assets: Map<String, ByteArray>): FloatArray? {
+        if (path == null) return null
+        val bytes = findAsset(assets, path) ?: return null
+        return runCatching {
+            when {
+                isPng(bytes) -> averagePng(bytes)
+                bytes.size > 54 && bytes[0] == 'B'.code.toByte() && bytes[1] == 'M'.code.toByte() ->
+                    averageBmp(bytes)
+                else -> null
+            }
+        }.getOrNull()
+    }
+
+    private fun averagePng(bytes: ByteArray): FloatArray? {
+        val b = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
+        val width = b.getInt(16)
+        val height = b.getInt(20)
+        val depth = bytes[24].toInt()
+        val colour = bytes[25].toInt()
+        if (depth != 8 || (colour != 2 && colour != 6)) return null
+        if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return null
+        val channels = if (colour == 6) 4 else 3
+
+        // Concatenate the IDAT chunks, then inflate.
+        val idat = ByteArrayOutputStream()
+        var p = 8
+        while (p + 8 <= bytes.size) {
+            val len = ByteBuffer.wrap(bytes, p, 4).order(ByteOrder.BIG_ENDIAN).int
+            val type = String(bytes, p + 4, 4, Charsets.US_ASCII)
+            if (len < 0 || p + 12 + len > bytes.size) break
+            if (type == "IDAT") idat.write(bytes, p + 8, len)
+            if (type == "IEND") break
+            p += 12 + len
+        }
+        if (idat.size() == 0) return null
+        val raw = java.util.zip.Inflater().run {
+            setInput(idat.toByteArray())
+            val out = ByteArrayOutputStream()
+            val buf = ByteArray(64 * 1024)
+            while (!finished()) {
+                val n = inflate(buf)
+                if (n == 0 && (needsInput() || needsDictionary())) break
+                out.write(buf, 0, n)
+            }
+            end()
+            out.toByteArray()
+        }
+
+        val stride = width * channels
+        if (raw.size < (stride + 1) * height) return null
+        val line = ByteArray(stride)
+        val prev = ByteArray(stride)
+        var r = 0L; var g = 0L; var bl = 0L; var n = 0L
+        var off = 0
+        for (y in 0 until height) {
+            val filter = raw[off].toInt() and 0xFF
+            System.arraycopy(raw, off + 1, line, 0, stride)
+            off += 1 + stride
+            // Undo the PNG scanline filter, which is what makes the bytes meaningful.
+            for (i in 0 until stride) {
+                val a = if (i >= channels) line[i - channels].toInt() and 0xFF else 0
+                val bb = prev[i].toInt() and 0xFF
+                val c = if (i >= channels) prev[i - channels].toInt() and 0xFF else 0
+                val x = line[i].toInt() and 0xFF
+                line[i] = when (filter) {
+                    1 -> (x + a)
+                    2 -> (x + bb)
+                    3 -> (x + (a + bb) / 2)
+                    4 -> {
+                        val pp = a + bb - c
+                        val pa = kotlin.math.abs(pp - a)
+                        val pb = kotlin.math.abs(pp - bb)
+                        val pc = kotlin.math.abs(pp - c)
+                        x + if (pa <= pb && pa <= pc) a else if (pb <= pc) bb else c
+                    }
+                    else -> x
+                }.toByte()
+            }
+            System.arraycopy(line, 0, prev, 0, stride)
+            var i = 0
+            while (i < stride) {
+                // Weight by alpha where there is one: a transparent pixel carries
+                // no colour worth averaging in.
+                val alpha = if (channels == 4) line[i + 3].toInt() and 0xFF else 255
+                if (alpha > 8) {
+                    r += (line[i].toInt() and 0xFF).toLong()
+                    g += (line[i + 1].toInt() and 0xFF).toLong()
+                    bl += (line[i + 2].toInt() and 0xFF).toLong()
+                    n++
+                }
+                i += channels
+            }
+        }
+        if (n == 0L) return null
+        return floatArrayOf(r.toFloat() / n / 255f, g.toFloat() / n / 255f, bl.toFloat() / n / 255f)
+    }
+
+    private fun averageBmp(bytes: ByteArray): FloatArray? {
+        val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val dataStart = b.getInt(10)
+        val width = b.getInt(18)
+        val height = b.getInt(22)
+        val bpp = b.getShort(28).toInt()
+        if (bpp != 24 && bpp != 32) return null
+        if (width <= 0 || height == 0) return null
+        val step = bpp / 8
+        val rowSize = ((width * step + 3) / 4) * 4
+        var r = 0L; var g = 0L; var bl = 0L; var n = 0L
+        val stride = maxOf(1, width / 64)
+        var y = 0
+        while (y < kotlin.math.abs(height)) {
+            var x = 0
+            while (x < width) {
+                val at = dataStart + y * rowSize + x * step
+                if (at + 2 < bytes.size) {
+                    bl += (bytes[at].toInt() and 0xFF).toLong()
+                    g += (bytes[at + 1].toInt() and 0xFF).toLong()
+                    r += (bytes[at + 2].toInt() and 0xFF).toLong()
+                    n++
+                }
+                x += stride
+            }
+            y += stride
+        }
+        if (n == 0L) return null
+        return floatArrayOf(r.toFloat() / n / 255f, g.toFloat() / n / 255f, bl.toFloat() / n / 255f)
     }
 
     private fun safe(name: String): String =
