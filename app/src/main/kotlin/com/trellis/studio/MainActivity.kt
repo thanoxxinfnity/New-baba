@@ -81,6 +81,7 @@ val drawerEntries = listOf(
     DrawerEntry("generate", "Create", Icons.Filled.AutoAwesome, "Images and 3D models", "Workspace"),
     DrawerEntry("rigstudio", "Rig Studio", Icons.Filled.Accessibility, "Upload your model, add bones, download it", "Workspace"),
     DrawerEntry("sketchfab", "Sketchfab", Icons.Filled.Download, "Find models by name or link, download them", "Workspace"),
+    DrawerEntry("zipconvert", "Zip → Model", Icons.Filled.FolderZip, "MMD .pmx and glTF archives to .glb", "Workspace"),
     DrawerEntry("gallery", "Gallery", Icons.Filled.Collections, "Everything you've made", "Workspace"),
     DrawerEntry("animate", "Animate", Icons.Filled.Animation, "Give your 3D models motion", "Workspace"),
     DrawerEntry("game", "Game Studio", Icons.Filled.SportsEsports, "Make a Godot game from your 3D models", "Workspace"),
@@ -309,6 +310,12 @@ fun MainContent() {
                         )
                     }
                     composable("spark") { SparkScreen(onMenu = openDrawer) }
+                    composable("zipconvert") {
+                        ZipConvertScreen(
+                            onMenu = openDrawer,
+                            onOpenModel = { path, name -> navController.openViewer(path, name) },
+                        )
+                    }
                     composable("sketchfab") {
                         SketchfabScreen(
                             onMenu = openDrawer,

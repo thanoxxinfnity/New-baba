@@ -5,7 +5,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.zip.ZipInputStream
 
 /**
  * Turns a Sketchfab glTF archive into one self-contained .glb.
@@ -26,7 +25,7 @@ object GltfPacker {
     suspend fun packZip(zipBytes: ByteArray, outputDir: File, name: String): Result<Packed> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val entries = unzip(zipBytes)
+                val entries = Zips.readAll(zipBytes)
 
                 // A few authors upload a .glb directly; then there is nothing to do.
                 entries.entries.firstOrNull { it.key.endsWith(".glb", true) }?.let { glb ->
@@ -111,22 +110,6 @@ object GltfPacker {
             }
         }
 
-    private fun unzip(bytes: ByteArray): Map<String, ByteArray> {
-        val files = LinkedHashMap<String, ByteArray>()
-        ZipInputStream(bytes.inputStream()).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                if (!entry.isDirectory) {
-                    // Zip entries can carry ".." paths; nothing here is written by
-                    // name, but the guard keeps a crafted archive from mattering.
-                    val clean = entry.name.replace('\\', '/').removePrefix("./")
-                    if (!clean.contains("../")) files[clean] = zip.readBytes()
-                }
-                zip.closeEntry()
-            }
-        }
-        return files
-    }
 
     /** glTF uris are relative to the .gltf file and are percent-encoded. */
     private fun resolve(baseDir: String, uri: String): String {
