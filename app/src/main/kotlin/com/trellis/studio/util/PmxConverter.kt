@@ -128,7 +128,12 @@ object PmxConverter {
             val images = mutableListOf<JsonObject>()
             val samplers = listOf(buildJsonObject { put("wrapS", 10497); put("wrapT", 10497) })
             val texturesJson = mutableListOf<JsonObject>()
+            // Only the slots some material actually draws with. A sphere map is
+            // read for its average colour but never sampled by glTF, so embedding
+            // one just carried dead weight in the file.
+            val drawnSlots = m.materials.map { it.textureIndex }.toSet()
             m.textures.forEachIndexed { slot, path ->
+                if (slot !in drawnSlots) return@forEachIndexed
                 val bytes = findAsset(assets, path) ?: return@forEachIndexed
                 // Judge the format by its magic bytes, not its name. MMD packs are
                 // full of files renamed by hand — this model's sphere maps are
